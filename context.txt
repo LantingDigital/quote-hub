@@ -1,62 +1,63 @@
 SECTION 1: HEADER METADATA
 Project Name: Quote Hub & Client Portal
 Author: Lanting Digital LLC
-Original Codebase: automated-hiring-funnel (refactored)
-Purpose: A comprehensive Business Operating System to manage the entire client lifecycle, from initial quote generation and contract signing to long-term project management and client communication.
-Context Version: v2.0 (Updated 2025-10-31)
+Original Codebase: automated-hiring-funnel (deceptively named)
+Purpose: A comprehensive Business Operating System (BOS) to manage the entire client lifecycle, from initial quote generation and contract signing to long-term project management and client communication.
+Context Version: v4.0 (Last Updated: 2025-11-01)
 
-SECTION 2: OVERVIEW & LONG-TERM VISION
-This application is the central "brain" for business operations.
-It was initially built as a "Quote Hub" to solve the inefficiency of manually creating multiple PDF quotes (the "nine PDF problem").
-The system generates quotes and legal contracts dynamically. The core function is to create a unique, interactive "Tinker Toy" calculator link for clients, allowing them to adjust their service package live. It also supports generating static quotes for simpler service models.
+SECTION 2: OVERVIEW & CORE PHILOSOPHY
+This application is the central "brain" for all business operations.
+It originated as a refactor of an old project (`automated-hiring-funnel`) to solve the "nine PDF problem"—the inefficiency of manually creating multiple, slightly different PDF quotes for services.
+The system's primary function is to serve as a **Quote Hub**. It generates quotes and legal contracts dynamically.
+Its key feature is the "Tinker Toy": a client-facing, interactive calculator link (the former `ApplicantForm.js`) that allows a client to select different service tiers, payment plans, and amortization terms, and see their pricing update live.
+It also supports generating static quotes for simpler service models (Project, Maintenance, Hourly).
 
-**LONG-TERM VISION (PHASE 2):**
-The Quote Hub is the first module of a full-fledged **Client Portal**. The end-to-end vision is to create a secure, authenticated platform for both admin and clients.
+SECTION 3: LONG-TERM VISION (PHASE 2)
+The Quote Hub is only the first module of a full-fledged **Client Portal**.
+The end-to-end vision is to create a secure, authenticated, white-label platform for both admin (you) and your clients.
 1.  **Client Accounts:** Clients will have their own encrypted accounts to log in, view their project status, and access all documents.
-2.  **Tiered Access:** A client's SaaS subscription plan (e.g., "Growth") will unlock specific privileges within the portal, such as a "Support" tab or a live chat feature.
-3.  **Project Management:** The "Project Scope" defined during quoting will become a live "checklist" for project execution.
-4.  **E-Signatures:** Integrate a system for clients and admin to digitally sign and counter-sign the generated contracts directly within the app.
-5.  **Client Communication:** A built-in chat or email system to handle all project-related communication, logging all attachments and updates.
+2.  **E-Signatures:** Integrate a third-party service (e.g., DocuSign, HelloSign) or build a native signature pad. This will allow clients and admin to digitally sign and counter-sign the generated contracts (SOW, MSA) directly within the app, eliminating the email step.
+3.  **Project Management:** The "Project Scope" defined during the quoting phase (and saved in the `quote` doc) will become a live "checklist" of deliverables in the client's portal.
+4.  **Client Communication:** A built-in chat or email system to handle all project-related communication, logging all attachments and updates against their project.
+5.  **Tiered Access:** A client's SaaS subscription plan (e.g., "Growth" tier) will conditionally unlock specific privileges within their portal, such as a "Support" tab or the live chat feature.
 
-SECTION 3: ARCHITECTURE SUMMARY
--   **Frontend:** React (CRA)
+SECTION 4: ARCHITECTURE & KEY FILES
+
+**--- STACK ---**
+-   **Frontend:** React (Create React App)
 -   **Backend:** Firebase (Node.js 20)
--   **Database:** Firestore
+-   **Database:** Firestore (NoSQL)
 -   **Authentication:** Firebase Authentication (Admin-only for Phase 1)
--   **File Storage:** Firebase Storage (for generated contracts)
--   **Serverless Functions:** Firebase Cloud Functions (2nd Gen, Node.js 20)
--   **Contract Generation:** `puppeteer` (full package) for HTML-to-PDF conversion.
+-   **File Storage:** Firebase Storage (for generated contract PDFs)
+-   **Serverless Functions:** Firebase Cloud Functions (2nd Gen)
 
-*** KEY INFRASTRUCTURE (Unchanged) ***
--   The `generateContractV2` function relies on the full `puppeteer` package.
--   This requires a `.puppeteerrc.cjs` file in `functions/` to set a writable cache directory (`/tmp/puppeteer_cache`).
--   A `postinstall` script in `functions/package.json` (`"puppeteer browsers install chrome"`) is required for deployment.
+**--- KEY FILES (CLIENT) ---**
+The `client/src/` directory was heavily refactored. Many files have new names:
+-   `client/src/pages/ApplicantForm.js` -> Renamed to **`QuoteCalculator.js`**. This is the client-facing "Tinker Toy" page.
+-   `client/src/pages/ApplicantProfile.js` -> Renamed to **`QuoteProfile.js`**. This is the **Admin Control Panel** for a specific quote. It's where the admin can edit "locked" variables (like `hours`, `buffer`) and trigger the `generateContractV2` function.
+-   `client/src/pages/QuestionnaireBuilder.js` -> Renamed to **`ProductManager.js`**. This is the (currently unfinished) admin UI for editing the `config/main` document.
+-   `client/src/pages/AllApplicants.js` -> Renamed to **`AllQuotes.js`** (or `Dashboard.js`). This is the list of all quotes.
+-   `client/src/logic/quoteCalculator.js` -> This is the **"Client-Side Brain"**. It contains the JavaScript logic for calculating subscription/project fees live in the browser. This *exact same logic* is copied into the server function for 100% consistency.
 
-SECTION 4: REFACTOR SUMMARY (PHASE 1 - COMPLETED)
-The original "automated-hiring-funnel" codebase has been completely refactored to serve the "Quote Hub" purpose. This involved migrating business logic from an *old* project (`quote-hub` / `petes-holiday-lighting`) and aligning the entire stack to a new, centralized data model.
+**--- KEY FILES (SERVER) ---**
+-   `functions/index.js`: This is the **"Server-Side Brain"** and the *only* critical file in the `functions` directory.
+-   **`generateContractV2` (Cloud Function):** This is the main function that:
+    1.  Fetches the `quote` and `config` docs from Firestore.
+    2.  Imports and uses the *same* calculation logic from `quoteCalculator.js`.
+    3.  Uses the **`pdf-lib`** library to draw all 4 legal documents (SOW, MSA, SLA, DPA) from scratch.
+    4.  Saves the generated PDFs to Firebase Storage.
+    5.  Updates the `quote` doc with the `contractDocs` array (containing the new file URLs).
 
-**1. Centralized Business Logic:**
--   All business rules, rates, and service descriptions were moved from hardcoded files into a single, admin-editable document: `config/main` in Firestore.
--   This document is based on the `config.json` structure from the old `quote-hub` project.
+**DEPRECATED (REMOVED):**
+-   `functions/templates/`: This entire directory (`SOW.html`, `MSA.html`, etc.) has been **DELETED**.
+-   `puppeteer`: This library has been **REMOVED** from `functions/package.json`. We no longer use HTML-to-PDF conversion.
 
-**2. Refactored Core Files (Client):**
--   `client/src/pages/QuestionnaireBuilder.js` -> Renamed to **Product Manager**. This is now the admin UI for editing the `config/main` document.
--   `client/src/logic/quoteCalculator.js` -> This is the **"Brain"**. The simple logic was replaced with the advanced seasonal/amortization logic from `petes-holiday-lighting/quoteCalculator.js` and aligned with the new `config/main` structure.
--   `client/src/pages/ApplicantForm.js` -> Renamed to **Quote Calculator**. This is the client-facing "Tinker Toy" page. It now reads from `config/main` and uses the new "Brain" to calculate prices live.
--   `client/src/components/NewQuoteModal.js` -> This admin modal was refactored to create all 4 service models (`subscription`, `project`, `maintenance`, `hourly`) and to capture all necessary legal/scope data for contract generation.
--   `client/src/pages/AllApplicants.js` -> Renamed to **All Quotes**. The list now correctly queries and displays all new quote types.
--   `client/src/pages/ApplicantProfile.js` -> Renamed to **Quote Profile**. This is now the admin "control panel" for a specific quote. It can read all 4 quote types, allows editing of "locked" variables, and shows a live-recalculating preview.
+SECTION 5: DATA MODELS (FIRESTORE)
 
-**3. Refactored Core Files (Server):**
--   `functions/index.js` -> The `generateContractV2` function was completely rewritten.
--   It now **imports and uses the *same* calculation logic** from `quoteCalculator.js` to ensure 100% server/client consistency.
--   The `placeholderData` object was rebuilt to match all placeholders in the HTML templates and pull data from the new `quote` and `config` document structures.
--   The old, broken `calculatePrices` helper was removed.
-
-SECTION 5: DATA MODELS
-**Firestore Collection: `config` (Document: `main`)**
+**Collection: `config` (Document: `main`)**
+This document acts as the single source of truth for all business rules, rates, and service descriptions. It is intended to be editable by an admin via the `ProductManager.js` page.
 -   `base_rates`: { `hourly_rate`, `default_contingency_buffer_percent`, ... }
--   `company_info`: { `name`, `contact_name`, ... }
+-   `company_info`: { `name`, `contact_name`, `contact_email`, `address` ... }
 -   `models`: {
     -   `subscription`: { `display_name`, `amortization_terms` (Array), `tiers` (Object), `payment_options` (Object) }
     -   `project`: { `display_name`, `description` }
@@ -64,61 +65,90 @@ SECTION 5: DATA MODELS
     -   `hourly`: { `display_name`, `description` }
 -   }
 
-**Firestore Collection: `quotes` (Document: `[quoteId]`)**
+**Collection: `quotes` (Document: `[quoteId]`)**
+This document stores all information for a specific quote. It is created by an admin and then edited by both the client (on the "Tinker Toy" page) and the admin (on the `QuoteProfile.js` page).
 -   **Client Info:** `clientContactName`, `email`, `clientLegalName`, `clientLegalAddress`, `clientEntityType`
--   **Project Info:** `projectTitle`, `projectScope`
--   **System Info:** `serviceModel`, `status`, `userId`, `createdAt`
+-   **Project Info:** `projectTitle`, `projectScope` (this is a multi-line string, `\n` is preserved)
+-   **System Info:** `serviceModel` (e.g., "subscription"), `status` (e.g., "New", "Accepted"), `userId` (admin who created it)
 -   **"Tinker Toy" Vars:** `hours`, `buffer`, `discountPct`, `discountUsd`, `billingSchedule`, `amortStartMonth`, `yr1SeasonalRange`, etc.
--   **"Static" Vars:** `finalMonthlyFee`, `includedHours`, `finalTotalCost`
--   **Client Selections:** `selectedTier`, `selectedPaymentPlan`, `selectedAmortizationTerm` (set by client or admin)
--   **Generated Docs:** `contractDocs` (Array), `lastContractGenerated` (Timestamp)
+-   **"Static" Vars:** (Used for non-tinker-toy models like Maintenance) `finalMonthlyFee`, `includedHours`, `finalTotalCost`
+-   **Client Selections:** `selectedTier`, `selectedPaymentPlan`, `selectedAmortizationTerm` (these are set by the client on the "Tinker Toy" page)
+-   **Generated Docs:** `contractDocs` (Array of objects: `{ name, url, path, generatedAt }`), `lastContractGenerated` (Timestamp)
 
-SECTION 6: CURRENT FOCUS & FUTURE TODOS
+SECTION 6: PROJECT HISTORY & STATUS
 
 **--- PHASE 1: CORE REFACTOR (COMPLETE) ---**
--   **COMPLETED:** Migrated `config.json` logic into `config/main` Firestore document.
--   **COMPLETED:** Refactored `ProductManager.js` to edit new config.
--   **COMPLETED:** Refactored `quoteCalculator.js` ("Brain") with advanced amortization/seasonal logic.
--   **COMPLETED:** Refactored `ApplicantForm.js` ("Tinker Toy") to use new "Brain" and config.
--   **COMPLETED:** Refactored `NewQuoteModal.js` to create all 4 quote types and capture legal/scope data.
--   **COMPLETED:** Refactored `AllApplicants.js` and `Dashboard.js` to display new quotes.
--   **COMPLETED:** Refactored `ApplicantProfile.js` as the new admin "control panel."
--   **COMPLETED:** Aligned `functions/index.js` with all new data models and placeholders, fixing the contract generation pipeline.
+-   **GOAL:** Refactor the `automated-hiring-funnel` codebase to serve as a "Quote Hub."
+-   **ACTION:** Migrated all business logic from an old project (`petes-holiday-lighting`) and the client-side files were renamed (see Section 4).
+-   **STATUS:** Complete.
 
-**--- PHASE 1.5: TESTING & BUGFIXES (CURRENT FOCUS) ---**
--   **IMMEDIATE TODO:** End-to-end test of the full pipeline:
-    1.  Admin: `firebase deploy --only functions` (to deploy new `index.js`).
-    2.  Admin: Create a new "Subscription" quote from the Dashboard, filling in *all* fields.
-    3.  Client: Open the "Tinker Toy" link, select options, and click "Accept & Generate Contract."
-    4.  Admin: Go to the `QuoteProfile.js` page for that quote and click "Generate Contract(s)."
-    5.  Admin: Open the resulting PDF and verify *all* placeholders (`[Client Legal Name]`, `[Project Scope]`, `[Total Monthly Fee]`, etc.) are filled correctly.
+**--- PHASE 1.5: PDF GENERATION OVERHAUL (COMPLETE) ---**
+-   **GOAL:** Build a reliable, fast, and professional contract generation pipeline.
+-   **ATTEMPT 1 (FAILED):** Used `puppeteer` to convert HTML templates (`SOW.html`, `MSA.html`, etc.) to PDF.
+    -   *REASON FOR FAILURE:*
+        1.  **Speed:** Function took 45-60 seconds to run. It had to launch a full, headless Chrome instance (470MB) *for each document*.
+        2.  **Stability:** The "print" CSS engine is notoriously buggy. It could not handle our layouts (CSS Grid/Flexbox), resulting in a "trashy" PDF that looked like a misaligned screenshot.
+        3.  **Fidelity:** Margins were wrong, text was non-selectable, and page breaks were random.
+-   **ATTEMPT 2 (SUCCESS - V7):** We **pivoted the entire architecture**.
+    -   **INSPIRATION:** We reviewed a Python project (`GenaricPriceChart/app.py`) that used `fpdf2`. Its `multi_cell` function and class-based helpers (`add_section_title`) were clean and effective.
+    -   **ACTION:** We ripped out `puppeteer` and the entire `functions/templates/` directory.
+    -   **ACTION:** We re-platformed onto the **`pdf-lib`** Node.js library.
+    -   **ACTION:** We re-wrote `functions/index.js` to draw all 4 documents (SOW, MSA, SLA, DPA) *from scratch* using code.
+    -   **ACTION:** We created our own helper functions (`drawWrappedText`, `addH2`, `addH3`, `checkPageBreak`, `addSignatureBlocks`) that replicate the `fpdf2` logic, giving us full control over text flow and page breaks.
 
-**--- PHASE 2: CLIENT PORTAL (LONG-TERM VISION) ---**
--   **TODO:** Refactor Authentication.
+**--- PHASE 1.6: POLISH & TAILORING (COMPLETE) ---**
+-   **GOAL:** Refine the `pdf-lib` output to be professional and dynamic.
+-   **ACTION (Style):** Implemented the new style guide (V6).
+    -   Switched fonts to **Helvetica**.
+    -   Set proper **0.75" (54pt) margins**.
+    -   Implemented **Navy Blue** headers (H2) and **Bold Black** sub-headers (H3).
+    -   Replaced `[X]` with proper checkbox symbols (**☑ / ☐**) using the `ZapfDingbats` font.
+    -   Added "keep-together" logic to `checkPageBreak` to prevent "obnoxious" breaks on headers and signature blocks.
+-   **ACTION (Tailoring):** Made the contracts dynamic (V7).
+    -   The `drawMSA` function now wraps service-specific sections in `if (data.serviceModel === "...")` blocks.
+    -   This ensures that irrelevant clauses (e.g., Subscription terms on a Project quote) are correctly **omitted** from the final PDF.
+-   **BUG FIX (SOW):** Fixed a bug in `drawSOW` that was calling `drawWrappedText` twice and duplicating the "Engagement Model" options.
+
+**--- PHASE 1.7: CURRENT STATUS ---**
+-   **"WHERE WE ARE NOW"**
+-   The contract generation pipeline (`generateContractV2`) is **stable, fast (2-5 seconds), and professionally formatted.**
+-   All four legal documents are fully ported to `pdf-lib` and are dynamically tailored to the quote's `serviceModel`.
+-   The client-side "Tinker Toy" (`QuoteCalculator.js`) and admin "Control Panel" (`QuoteProfile.js`) are fully functional.
+
+**--- PHASE 1.8: IMMEDIATE NEXT STEPS ---**
+-   **"WHAT'S NEXT ON OUR CHECKLIST"**
+-   **GOAL:** Finalize the quote workflow UI to match our new, clear process. These are all **frontend React** tasks.
+-   **TASK 1 (React):** Reword the client-facing "Tinker Toy" page (`client/src/pages/ApplicantForm.js`).
+    -   Change the main call-to-action button text from "Accept & Generate Contract" to **"Submit Quote"**.
+-   **TASK 2 (React):** Update the admin-side `QuoteProfile.js` UI.
+    -   Change the status indicator to clearly show "Quote Submitted" (or "Accepted by Client") after Task 1 is done.
+    -   This clarifies that the *admin* holds the power to click "Generate Contract(s)."
+-   **TASK 3 (React):** Implement the client-adjustable amortization term.
+    -   In `client/src/pages/ApplicantForm.js`, find the `<select>` for "Build Cost Term".
+    -   Change this dropdown to a slider or number input that allows the client to select any number *between* the min/max terms.
+    -   *Note: The backend `calculateSubscription` logic already supports this by reading `selectedAmortizationTerm`; this is a frontend-only task.*
+
+**--- PHASE 2: LONG-TERM ROAD MAP ---**
+-   **"WHAT TO WORK ON AFTER 'NEXT STEPS' ARE DONE"**
+-   **GOAL:** Evolve from a "Quote Hub" into the full "Client Portal" (see Section 3).
+-   **TASK 1 (Auth):** Refactor Firebase Authentication.
     -   Create a client-facing "Sign Up" and "Login" flow.
     -   Create a new top-level `clients` collection in Firestore.
     -   When a client signs up, create a `clients/{clientId}` document.
-    -   Link a client's `quotes` to their `clientId`.
--   **TODO:** Build Client Dashboard.
-    -   Create a new page (e.g., `/portal`) that clients see after logging in.
-    -   This page will list their active projects, signed contracts, and recent communications.
--   **TODO:** Implement E-Signatures.
-    -   Integrate a third-party service (e.g., DocuSign, HelloSign) or build a native signature pad.
-    -   Update the "Accept" flow to require a legal signature.
-    -   Create a flow for the Admin (you) to "counter-sign" documents.
--   **TODO:** Build Project Scope Manager.
-    -   On the Client Dashboard, display the `projectScope` from the SOW.
-    -   Build a UI to manage this scope as a "checklist" of deliverables.
--   **TODO:** Build Client Chat System.
-    -   Implement a real-time chat feature (using Firestore) on the Client Dashboard.
-    -   Use `config/main` to conditionally show this chat widget based on the client's `serviceModel` or `tier`.
-
-SECTION 7: RELATED DOCS
--   `config.json` (The new data model, now lives in `config/main`)
--   `functions/index.js` (The main cloud function, `generateContractV2`)
--   `functions/templates/SOW.html`
--   `functions/templates/MSA.html`
--   `functions/templates/SLA.html`
--   `functions/templates/DPA.html`
--   `client/src/logic/quoteCalculator.js` (The "Brain")
--   `old_project/petes-holiday-lighting/quoteCalculator.js` (Reference for calculation logic)
+    -   Modify `NewQuoteModal.js` to associate a new quote with a `clientId`.
+-   **TASK 2 (Portal UI):** Build the Client Dashboard.
+    -   Create a new page (e.g., `/portal`).
+    -   This page will be the client's home base, where they see a list of their projects (quotes) and their statuses.
+-   **TASK 3 (E-Signatures):** This is the next major feature.
+    -   Research and select an e-signature API (e.g., DocuSign, HelloSign, Dropbox Sign).
+    -   Replace the "Generate Contract(s)" button with a "Send for Signature" flow.
+    -   This flow will call our `generateContractV2` function, get the PDF bytes, and send them to the e-sign service.
+    -   Create a "counter-sign" flow for the admin.
+-   **TASK 4 (Project Management):**
+    -   On the client's `/portal` page, add a "Project Details" view.
+    -   Read the `projectScope` string from the `quote` doc.
+    -   Render this scope as a "checklist" of deliverables.
+-   **TASK 5 (Comms):**
+    -   Build a real-time chat widget using Firestore.
+    -   Conditionally show this widget in the portal based on the client's `serviceModel` or `tier` (read from `config/main`).
+    
