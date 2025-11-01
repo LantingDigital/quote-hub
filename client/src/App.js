@@ -26,23 +26,28 @@ function App() {
   return (
     <AuthProvider>
       <ProfileProvider>
-        <Router>
-          <ReorderingProvider>
+        <ReorderingProvider>
+          <Router>
             <Routes>
-              {/* --- Public Routes Updated --- */}
+              {/* --- Public Routes --- */}
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<SignUp />} />
-              {/* This is the new "Dynamic Link" for the tinkering client */}
-              <Route path="/quote/:quoteId" element={<QuoteCalculator />} /> 
-              {/* <Route path="/application-submitted" element={<ApplicationSubmitted />} /> */}
-              {/* <Route path="/schedule-interview" element={<ScheduleInterview />} /> */}
-              
+              <Route path="/quote/:id" element={<QuoteCalculator />} /> 
+              {/* <Route path="/submitted" element={<ApplicationSubmitted />} /> */}
+              {/* <Route path="/schedule-interview/:id" element={<ScheduleInterview />} /> */}
+
               {/* --- Protected Admin Routes --- */}
-              {/* Removed /onboarding route, as it's handled by ProtectedRoute now */}
-              <Route path="/*" element={<ProtectedRoute><AppContent /></ProtectedRoute>} />
+              <Route 
+                path="/*" 
+                element={
+                  <ProtectedRoute>
+                    <AppContent />
+                  </ProtectedRoute>
+                } 
+              />
             </Routes>
-          </ReorderingProvider>
-        </Router>
+          </Router>
+        </ReorderingProvider>
       </ProfileProvider>
     </AuthProvider>
   );
@@ -52,8 +57,7 @@ function AppContent() {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // isReordering prop is passed to Sidebar to control animation
-  const isReordering = location.pathname === '/config'; 
+  // NOTE: Removed 'isReordering' const that was previously here
 
   const handleLinkClick = () => {
     if (isMobileMenuOpen) setIsMobileMenuOpen(false);
@@ -61,11 +65,10 @@ function AppContent() {
 
   return (
     <div className="flex bg-gray-100 min-h-screen"> 
-      {/* --- Pass isReordering prop --- */}
+      {/* --- 'isReordering' prop removed --- */}
       <Sidebar 
         isMobileMenuOpen={isMobileMenuOpen} 
         onLinkClick={handleLinkClick} 
-        isReordering={isReordering} // This prop is crucial for your sidebar animation logic
       />
       <div className="flex-1 flex flex-col">
         {/* Using the original dark Header */}

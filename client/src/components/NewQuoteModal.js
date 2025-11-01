@@ -6,14 +6,15 @@ import {
   Transition,
   TransitionChild,
 } from '@headlessui/react';
-import { LinkIcon, Loader2, AlertCircle, FileDown } from 'lucide-react';
+import { LinkIcon, Loader2, AlertCircle, CalendarRange, Save, Briefcase, FileText } from 'lucide-react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
-import { db, generateQuotePDF } from '../firebase'; // --- Import our cloud function ---
+import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
+import { motion, AnimatePresence } from 'framer-motion';
 
-// Helper component (unchanged)
-const FormInput = ({ label, id, value, onChange, type = 'text', placeholder }) => (
+// --- Helper Components ---
+const FormInput = ({ label, id, value, onChange, type = 'text', placeholder, step }) => (
   <div>
     <label htmlFor={id} className="block text-sm font-medium text-gray-700">
       {label}
@@ -26,17 +27,41 @@ const FormInput = ({ label, id, value, onChange, type = 'text', placeholder }) =
         value={value}
         onChange={onChange}
         placeholder={placeholder}
+        step={step}
         className="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
       />
     </div>
   </div>
 );
 
-// Helper component (re-used from QuoteCalculator)
-const SelectInput = ({ label, value, onChange, children }) => (
+// --- NEW Textarea Component ---
+const FormTextarea = ({ label, id, value, onChange, placeholder, rows = 3 }) => (
   <div>
-    <label className="block text-sm font-medium text-gray-700">{label}</label>
+    <label htmlFor={id} className="block text-sm font-medium text-gray-700">
+      {label}
+    </label>
+    <div className="mt-1">
+      <textarea
+        id={id}
+        name={id}
+        rows={rows}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+      />
+    </div>
+  </div>
+);
+
+const SelectInput = ({ label, id, value, onChange, children }) => (
+  <div>
+    <label htmlFor={id} className="block text-sm font-medium text-gray-700">
+      {label}
+    </label>
     <select
+      id={id}
+      name={id}
       value={value}
       onChange={onChange}
       className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
@@ -46,27 +71,46 @@ const SelectInput = ({ label, value, onChange, children }) => (
   </div>
 );
 
-export default function NewQuoteModal({ isOpen, onClose, onLinkGenerated, onPdfGenerated }) {
+// --- Default state for the form ---
+const defaultFormState = {
+  clientContactName: '', // Renamed from clientName
+  email: '',
+  // NEW Legal Fields
+  clientLegalName: '',
+  clientLegalAddress: '',
+  clientEntityType: '', // e.g., "California LLC"
+  // NEW Project Fields
+  projectTitle: '',
+  projectScope: '',
+  // Tinker Toy Fields
+  hours: '10',
+  buffer: '20',
+  discountPct: '0',
+  discountUsd: '0',
+  billingSchedule: 'standard',
+  amortStartMonth: '', 
+  yr1SeasonalRange: '',
+  yr2SeasonalRange: '',
+  yr2StartDate: '',
+  paymentScheduleYears: 2,
+  // Maintenance Fields
+  maintenanceFee: '',
+  maintenanceHours: '',
+  // Hourly Fields
+  hourlyEstHours: '1',
+};
+
+export default function NewQuoteModal({ isOpen, onClose, onLinkGenerated }) {
   const { currentUser } = useAuth();
-  const [formData, setFormData] = useState({
-    clientName: '',
-    email: '',
-    hours: '20',
-    discountPct: '0',
-  });
-  
-  // --- NEW STATE for PDF generation ---
   const [config, setConfig] = useState(null);
-  const [selectedTierId, setSelectedTierId] = useState('');
-  const [selectedPlanId, setSelectedPlanId] = useState('');
-  
-  const [loadingLink, setLoadingLink] = useState(false);
-  const [loadingPdf, setLoadingPdf] = useState(false);
+  const [selectedModel, setSelectedModel] = useState('subscription'); // 'subscription', 'project', 'maintenance', 'hourly'
+  const [formData, setFormData] = useState(defaultFormState);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // --- NEW: Fetch config data when modal opens ---
+  // Fetch config data when modal opens (for defaults)
   useEffect(() => {
-    if (isOpen && !config) {
+    if (isOpen) {
       const fetchConfig = async () => {
         try {
           const configRef = doc(db, 'config', 'main');
@@ -74,9 +118,13 @@ export default function NewQuoteModal({ isOpen, onClose, onLinkGenerated, onPdfG
           if (configSnap.exists()) {
             const configData = configSnap.data();
             setConfig(configData);
-            // Set defaults for the dropdowns
-            setSelectedTierId(configData.tiers[0]?.id || '');
-            setSelectedPlanId(configData.paymentPlans[0]?.id || '');
+            // Pre-fill defaults
+            setFormData(prev => ({
+              ...prev,
+              maintenanceFee: configData.models.maintenance.default_fee.toString(),
+              maintenanceHours: configData.models.maintenance.default_included_hours.toString(),
+              buffer: configData.base_rates.default_contingency_buffer_percent.toString(),
+            }));
           } else {
             setError('Could not load pricing config. Please save in Product Manager.');
           }
@@ -86,95 +134,131 @@ export default function NewQuoteModal({ isOpen, onClose, onLinkGenerated, onPdfG
       };
       fetchConfig();
     }
-  }, [isOpen, config]);
+  }, [isOpen]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  // --- Handler 1: Generate Client Link (Unchanged) ---
-  const handleGenerateLink = async (e) => {
+  const handleModelChange = (e) => {
+    setSelectedModel(e.target.value);
+    setError(''); // Clear errors when switching
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.clientName) {
-      setError('Client Name is required.');
+    // Check for NEW required fields
+    if (!formData.clientContactName || !formData.clientLegalName || !formData.projectTitle) {
+      setError('Contact Name, Legal Name, and Project Title are required.');
       return;
     }
-    setLoadingLink(true);
+    setLoading(true);
     setError('');
 
     try {
-      const newQuoteData = {
-        ...formData,
-        hours: parseFloat(formData.hours),
-        discountPct: parseFloat(formData.discountPct),
+      let newQuoteData = {
+        // Contact & Legal Info
+        clientContactName: formData.clientContactName,
+        email: formData.email,
+        clientLegalName: formData.clientLegalName,
+        clientLegalAddress: formData.clientLegalAddress,
+        clientEntityType: formData.clientEntityType,
+        // Project Info
+        projectTitle: formData.projectTitle,
+        projectScope: formData.projectScope,
+        // System Info
+        serviceModel: selectedModel,
+        status: 'Pending',
         userId: currentUser.uid,
         createdAt: serverTimestamp(),
-        status: 'Draft',
       };
-      const docRef = await addDoc(collection(db, 'quotes'), newQuoteData);
-      const link = `${window.location.origin}/quote/${docRef.id}`;
-      onLinkGenerated(link); // Pass link to Dashboard
+      
+      let link = null;
+
+      // Add data specific to the chosen model
+      if (selectedModel === 'subscription' || selectedModel === 'project') {
+        // --- This is a "Tinker Toy" Quote ---
+        newQuoteData = {
+          ...newQuoteData,
+          hours: parseFloat(formData.hours) || 0,
+          buffer: parseFloat(formData.buffer) || 0,
+          discountPct: parseFloat(formData.discountPct) || 0,
+          discountUsd: parseFloat(formData.discountUsd) || 0,
+          paymentScheduleYears: parseInt(formData.paymentScheduleYears, 10) || 2,
+          ...(selectedModel === 'subscription' && {
+            billingSchedule: formData.billingSchedule,
+            amortStartMonth: formData.amortStartMonth,
+            yr1SeasonalRange: formData.yr1SeasonalRange,
+            yr2SeasonalRange: formData.yr2SeasonalRange,
+            yr2StartDate: formData.yr2StartDate,
+          }),
+        };
+        const docRef = await addDoc(collection(db, 'quotes'), newQuoteData);
+        link = `${window.location.origin}/quote/${docRef.id}`;
+        
+      } else if (selectedModel === 'maintenance') {
+        // --- This is a "Static Maintenance" Quote ---
+        const fee = parseFloat(formData.maintenanceFee) || 0;
+        newQuoteData = {
+          ...newQuoteData,
+          finalMonthlyFee: fee,
+          finalTotalCost: fee * 12, // Set a default total for one year
+          includedHours: parseFloat(formData.maintenanceHours) || 0,
+        };
+        await addDoc(collection(db, 'quotes'), newQuoteData);
+        
+      } else if (selectedModel === 'hourly') {
+        // --- This is a "Static Hourly" Quote ---
+        const hours = parseFloat(formData.hourlyEstHours) || 0;
+        const total = hours * (config?.base_rates?.hourly_rate || 75);
+        newQuoteData = {
+          ...newQuoteData,
+          hours: hours,
+          finalTotalCost: total,
+          finalSetupFee: total,
+        };
+        await addDoc(collection(db, 'quotes'), newQuoteData);
+      }
+      
+      if (link) {
+        onLinkGenerated(link); // Pass link to Dashboard
+      }
       handleClose();
+
     } catch (err) {
       console.error('Error creating new quote:', err);
       setError('Failed to create quote. Please try again.');
     }
-    setLoadingLink(false);
+    setLoading(false);
   };
-
-  // --- Handler 2: Generate Static PDF (NEW) ---
-  const handleGeneratePDF = async (e) => {
-    e.preventDefault();
-    if (!formData.clientName || !selectedTierId || !selectedPlanId) {
-      setError('Client Name, Tier, and Payment Plan are required.');
-      return;
-    }
-    setLoadingPdf(true);
-    setError('');
-
-    try {
-      // Find the full objects for the selected IDs
-      const selectedTier = config.tiers.find(t => t.id === selectedTierId);
-      const selectedPayment = config.paymentPlans.find(p => p.id === selectedPlanId);
-
-      const quoteData = {
-        ...formData,
-        hours: parseFloat(formData.hours),
-        discountPct: parseFloat(formData.discountPct),
-        selectedTier,      // Pass the full tier object
-        selectedPayment, // Pass the full plan object
-      };
-
-      // Call the cloud function
-      const result = await generateQuotePDF(quoteData);
-      
-      // Pass the PDF URL back to the Dashboard
-      onPdfGenerated(result.data.pdfUrl);
-      handleClose();
-
-    } catch (err) {
-      console.error('Error generating PDF:', err);
-      setError('Failed to generate PDF. Please try again.');
-    }
-    setLoadingPdf(false);
-  };
-
 
   const handleClose = () => {
-    if (loadingLink || loadingPdf) return;
-    setFormData({
-      clientName: '', email: '', hours: '20', discountPct: '0',
-    });
+    if (loading) return;
+    setFormData(defaultFormState); // Reset to default state
+    setSelectedModel('subscription');
     setError('');
-    // We don't reset config
+    // Re-apply defaults from config if it's loaded
+    if (config) {
+      setFormData(prev => ({
+        ...prev,
+        ...defaultFormState, // Start from default
+        maintenanceFee: config.models.maintenance.default_fee.toString(),
+        maintenanceHours: config.models.maintenance.default_included_hours.toString(),
+        buffer: config.base_rates.default_contingency_buffer_percent.toString(),
+      }));
+    }
     onClose();
   };
+
+  // Change button text based on model
+  const isTinkerToy = selectedModel === 'subscription' || selectedModel === 'project';
+  const buttonText = isTinkerToy ? 'Save & Generate Client Link' : 'Save Static Quote';
+  const ButtonIcon = isTinkerToy ? LinkIcon : Save;
 
   return (
     <Transition show={isOpen} as={React.Fragment}>
       <Dialog as="div" className="relative z-50" onClose={handleClose}>
-        {/* ... TransitionChild for overlay (unchanged) ... */}
         <TransitionChild
           as={React.Fragment}
           enter="ease-out duration-300"
@@ -215,26 +299,35 @@ export default function NewQuoteModal({ isOpen, onClose, onLinkGenerated, onPdfG
                   </button>
                 </div>
                 
-                {/* --- Form now has two submit buttons --- */}
-                <form className="mt-4 space-y-4">
-                  <p className="text-sm text-gray-600">
-                    Enter the client's "locked" variables.
-                  </p>
-                  
+                <form className="mt-4 space-y-4" onSubmit={handleSubmit}>
                   {error && (
                     <div className="flex p-3 text-sm text-red-700 bg-red-100 rounded-md">
                       <AlertCircle className="w-5 h-5 mr-2" />
                       <span>{error}</span>
                     </div>
                   )}
+                  
+                  <SelectInput
+                    label="Quote Service Model"
+                    id="serviceModel"
+                    value={selectedModel}
+                    onChange={handleModelChange}
+                  >
+                    <option value="subscription">Subscription (SaaS)</option>
+                    <option value="project">Project Build & Buyout</option>
+                    <option value="maintenance">Maintenance Retainer</option>
+                    <option value="hourly">Ad-hoc / Hourly</option>
+                  </SelectInput>
+                  
+                  <div className="pt-2 border-t border-gray-200" />
 
-                  {/* --- Locked Variables Inputs (unchanged) --- */}
+                  {/* --- Core Details (Always Show) --- */}
                   <FormInput
-                    label="Client Name"
-                    id="clientName"
-                    value={formData.clientName}
+                    label="Client Contact Name"
+                    id="clientContactName"
+                    value={formData.clientContactName}
                     onChange={handleChange}
-                    placeholder="e.g., Pete's Lighting"
+                    placeholder="e.g., Pete Jones"
                   />
                   <FormInput
                     label="Client Email (Optional)"
@@ -244,92 +337,235 @@ export default function NewQuoteModal({ isOpen, onClose, onLinkGenerated, onPdfG
                     onChange={handleChange}
                     placeholder="pete@lighting.com"
                   />
+
+                  {/* --- NEW: Legal Details --- */}
+                  <div className="pt-2 border-t border-gray-100">
+                    <div className="flex items-center gap-2">
+                       <Briefcase className="w-5 h-5 text-gray-500" />
+                       <h4 className="text-md font-medium text-gray-800">Client Legal Details (for Contracts)</h4>
+                    </div>
+                  </div>
+                  <FormInput
+                    label="Client Legal Name"
+                    id="clientLegalName"
+                    value={formData.clientLegalName}
+                    onChange={handleChange}
+                    placeholder="e.g., Pete's Holiday Lighting, LLC"
+                  />
                   <div className="grid grid-cols-2 gap-4">
                     <FormInput
-                      label="Project Hours"
-                      id="hours"
-                      type="number"
-                      value={formData.hours}
+                      label="Client Legal Address"
+                      id="clientLegalAddress"
+                      value={formData.clientLegalAddress}
                       onChange={handleChange}
+                      placeholder="e.g., 123 Main St, Anytown, CA"
                     />
                     <FormInput
-                      label="Discount (%)"
-                      id="discountPct"
-                      type="number"
-                      value={formData.discountPct}
+                      label="Client State & Entity Type"
+                      id="clientEntityType"
+                      value={formData.clientEntityType}
                       onChange={handleChange}
+                      placeholder="e.g., California LLC"
                     />
                   </div>
                   
-                  {/* --- Button 1: Generate Link --- */}
-                  <div className="pt-4">
+                  {/* --- NEW: Project Details --- */}
+                  <div className="pt-2 border-t border-gray-100">
+                    <div className="flex items-center gap-2">
+                       <FileText className="w-5 h-5 text-gray-500" />
+                       <h4 className="text-md font-medium text-gray-800">Project Details (for SOW)</h4>
+                    </div>
+                  </div>
+                  <FormInput
+                    label="Project Title"
+                    id="projectTitle"
+                    value={formData.projectTitle}
+                    onChange={handleChange}
+                    placeholder="e.g., 2025 Holiday Website & Support"
+                  />
+                  <FormTextarea
+                    label="High-Level Scope of Work"
+                    id="projectScope"
+                    value={formData.projectScope}
+                    onChange={handleChange}
+                    placeholder="Summarize the key deliverables and services to be provided..."
+                    rows={4}
+                  />
+
+                  {/* --- Conditional Fields: Tinker Toy (Sub/Project) --- */}
+                  <AnimatePresence>
+                    {isTinkerToy && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="space-y-4 overflow-hidden pt-2 border-t border-gray-100"
+                      >
+                        <h4 className="text-md font-medium text-gray-800">Calculator Variables</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <FormInput
+                            label="Project Hours"
+                            id="hours"
+                            type="number"
+                            value={formData.hours}
+                            onChange={handleChange}
+                          />
+                          <FormInput
+                            label="Contingency Buffer (%)"
+                            id="buffer"
+                            type="number"
+                            value={formData.buffer}
+                            onChange={handleChange}
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <FormInput
+                            label="Discount (%)"
+                            id="discountPct"
+                            type="number"
+                            value={formData.discountPct}
+                            onChange={handleChange}
+                          />
+                          <FormInput
+                            label="Discount ($)"
+                            id="discountUsd"
+                            type="number"
+                            value={formData.discountUsd}
+                            onChange={handleChange}
+                          />
+                        </div>
+
+                        {selectedModel === 'subscription' && (
+                          <>
+                            <div className="pt-2 border-t border-gray-100">
+                              <div className="flex items-center gap-2">
+                                <CalendarRange className="w-5 h-5 text-gray-500" />
+                                <h4 className="text-md font-medium text-gray-800">Billing & Schedule</h4>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                              <SelectInput
+                                label="Billing Schedule"
+                                id="billingSchedule"
+                                value={formData.billingSchedule}
+                                onChange={handleChange}
+                              >
+                                <option value="standard">Standard (Billed Every Month)</option>
+                                <option value="seasonal">Seasonal (Billed Specific Months)</option>
+                              </SelectInput>
+                              <FormInput
+                                label="First Payment Month"
+                                id="amortStartMonth"
+                                type="text"
+                                value={formData.amortStartMonth}
+                                onChange={handleChange}
+                                placeholder="YYYY-MM (e.g., 2025-11)"
+                              />
+                            </div>
+                            {formData.billingSchedule === 'seasonal' && (
+                              <div className="space-y-4">
+                                <FormInput
+                                  label="Year 1 Seasonal Range"
+                                  id="yr1SeasonalRange"
+                                  type="text"
+                                  value={formData.yr1SeasonalRange}
+                                  onChange={handleChange}
+                                  placeholder="YYYY-MM:YYYY-MM (e.g., 2025-11:2025-12)"
+                                />
+                                <FormInput
+                                  label="Year 2+ Start Month (Optional)"
+                                  id="yr2StartDate"
+                                  type="text"
+                                  value={formData.yr2StartDate}
+                                  onChange={handleChange}
+                                  placeholder="YYYY-MM (e.g., 2026-09)"
+                                />
+                                <FormInput
+                                  label="Year 2+ Seasonal Range (Optional)"
+                                  id="yr2SeasonalRange"
+                                  type="text"
+                                  value={formData.yr2SeasonalRange}
+                                  onChange={handleChange}
+                                  placeholder="YYYY-MM:YYYY-MM (e.g., 2026-09:2026-12)"
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* --- Conditional Fields: Maintenance --- */}
+                  <AnimatePresence>
+                    {selectedModel === 'maintenance' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="space-y-4 overflow-hidden pt-2 border-t border-gray-100"
+                      >
+                        <h4 className="text-md font-medium text-gray-800">Retainer Variables</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <FormInput
+                            label="Monthly Fee ($)"
+                            id="maintenanceFee"
+                            type="number"
+                            value={formData.maintenanceFee}
+                            onChange={handleChange}
+                          />
+                          <FormInput
+                            label="Included Hours / mo"
+                            id="maintenanceHours"
+                            type="number"
+                            value={formData.maintenanceHours}
+                            onChange={handleChange}
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  
+                  {/* --- Conditional Fields: Hourly --- */}
+                  <AnimatePresence>
+                    {selectedModel === 'hourly' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="space-y-4 overflow-hidden pt-2 border-t border-gray-100"
+                      >
+                        <h4 className="text-md font-medium text-gray-800">Hourly Variables</h4>
+                        <FormInput
+                          label="Estimated Hours"
+                          id="hourlyEstHours"
+                          type="number"
+                          value={formData.hourlyEstHours}
+                          onChange={handleChange}
+                        />
+                        <p className="text-sm text-gray-600">
+                          Total cost will be calculated based on your default hourly rate of ${config?.base_rates?.hourly_rate || 'N/A'}.
+                        </p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  
+                  {/* --- Submit Button --- */}
+                  <div className="pt-4 border-t border-gray-200">
                     <button
                       type="submit"
-                      onClick={handleGenerateLink}
-                      disabled={loadingLink || loadingPdf}
+                      disabled={loading}
                       className="inline-flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm disabled:bg-gray-400 hover:bg-blue-700 focus:outline-none"
                     >
-                      {loadingLink ? (
+                      {loading ? (
                         <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                       ) : (
-                        <LinkIcon className="w-5 h-5 mr-2" />
+                        <ButtonIcon className="w-5 h-5 mr-2" />
                       )}
-                      {loadingLink ? 'Generating...' : 'Save & Generate Client Link'}
+                      {loading ? 'Generating...' : buttonText}
                     </button>
                   </div>
 
-                  <div className="relative my-4">
-                    <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-gray-300" />
-                    </div>
-                    <div className="relative flex justify-center text-sm">
-                      <span className="px-2 bg-white text-gray-500">OR</span>
-                    </div>
-                  </div>
-
-                  {/* --- PDF Generation Section --- */}
-                  <p className="text-sm text-gray-600">
-                    For a decisive client, select their package and generate a static PDF.
-                  </p>
-                  
-                  {/* --- NEW Dropdowns for PDF --- */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <SelectInput
-                      label="Select Tier"
-                      value={selectedTierId}
-                      onChange={(e) => setSelectedTierId(e.target.value)}
-                    >
-                      {config ? config.tiers.map(tier => (
-                        <option key={tier.id} value={tier.id}>{tier.name}</option>
-                      )) : <option disabled>Loading...</option>}
-                    </SelectInput>
-                    <SelectInput
-                      label="Select Payment Plan"
-                      value={selectedPlanId}
-                      onChange={(e) => setSelectedPlanId(e.target.value)}
-                    >
-                      {config ? config.paymentPlans.map(plan => (
-                        <option key={plan.id} value={plan.id}>{plan.name}</option>
-                      )) : <option disabled>Loading...</option>}
-                    </SelectInput>
-                  </div>
-
-                  {/* --- Button 2: Generate PDF --- */}
-                  <div className="pt-2">
-                    <button
-                      type="submit"
-                      onClick={handleGeneratePDF}
-                      disabled={loadingLink || loadingPdf || !config}
-                      className="inline-flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-gray-700 border border-transparent rounded-md shadow-sm disabled:bg-gray-400 hover:bg-gray-800 focus:outline-none"
-                    >
-                      {loadingPdf ? (
-                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      ) : (
-                        <FileDown className="w-5 h-5 mr-2" />
-                      )}
-                      {loadingPdf ? 'Generating PDF...' : 'Generate Static PDF'}
-                    </button>
-                  </div>
                 </form>
               </DialogPanel>
             </TransitionChild>

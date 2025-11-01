@@ -1,3 +1,7 @@
+/*
+automated-hiring-funnel/client/src/pages/Dashboard.js
+*/
+
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -60,7 +64,11 @@ const RecentQuoteItem = ({ quote }) => (
       </div>
       <div>
         <p className="text-sm font-medium text-gray-900 truncate">
-          {quote.clientName || 'Unnamed Quote'}
+          {/* ---
+            FIX: Changed from quote.clientName to quote.clientContactName
+            This matches the field being saved by NewQuoteModal.js
+            --- */}
+          {quote.clientContactName || 'Unnamed Quote'}
         </p>
         <p className="text-sm text-gray-500">
           {quote.createdAt

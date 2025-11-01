@@ -1,369 +1,684 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom'; // --- Import Link ---
-import { db, generateContractV2 } from '../firebase'; // --- Import generateContract ---
-import { doc, getDoc, updateDoc } from 'firebase/firestore'; // --- Import updateDoc ---
-import { useAuth } from '../context/AuthContext';
-import {
-  FileDown,
-  Loader2,
-  AlertCircle,
-  CheckCircle,
-  User,
-  Clock,
-  Mail,
-  DollarSign,
-  ClipboardList,
-  FileSignature, // --- Import new icon ---
-} from 'lucide-react';
-import AlertModal from '../components/AlertModal'; // --- Import AlertModal ---
+/*
+automated-hiring-funnel/client/src/pages/ApplicantProfile.js
+*/
 
-// --- getStatusColor (unchanged) ---
-const getStatusColor = (status) => {
-  switch (status) {
-    case 'Signed':
-      return 'bg-green-100 text-green-800';
-    case 'Sent':
-      return 'bg-blue-100 text-blue-800';
-    case 'Draft':
-      return 'bg-yellow-100 text-yellow-800';
-    default:
-      return 'bg-gray-100 text-gray-800';
-  }
+import React, { useState, useEffect, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { db, functions } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Loader2, AlertCircle, Save, FileText, CheckCircle, CalendarRange, Link, Download } from 'lucide-react'; // Added Link and Download icons
+import {
+  calculateSubscription,
+  calculateProject,
+  generatePaymentSchedule,
+} from '../logic/quoteCalculator';
+import AlertModal from '../components/AlertModal';
+
+// Import all required date-fns functions
+import {
+  addMonths,
+  startOfMonth,
+  parse,
+  isValid,
+  getMonth,
+  format,
+  isAfter,
+  isBefore,
+  differenceInCalendarMonths,
+  addYears,
+  isSameDay,
+} from 'date-fns';
+
+// Bundle date-fns functions into an object to pass to the calculator
+const dateFns = {
+  addMonths,
+  startOfMonth,
+  parse,
+  isValid,
+  getMonth,
+  format,
+  isAfter,
+  isBefore,
+  differenceInCalendarMonths,
+  addYears,
+  isSameDay,
 };
 
-// --- InfoItem (unchanged) ---
-const InfoItem = ({ icon, label, value }) => (
-  <li className="py-3 sm:py-4">
-    <div className="flex items-center space-x-4">
-      <div className="flex-shrink-0">
-        <span className="flex items-center justify-center w-8 h-8 text-gray-500 bg-gray-100 rounded-full">
-          {icon}
-        </span>
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-900 truncate">{label}</p>
-        <p className="text-sm text-gray-500 truncate">{value}</p>
-      </div>
+// --- Helper Components ---
+
+const AdminInput = ({ label, id, value, onChange, type = 'text', placeholder, step }) => (
+  <div>
+    <label htmlFor={id} className="block text-sm font-medium text-gray-700">
+      {label}
+    </label>
+    <div className="mt-1">
+      <input
+        type={type}
+        name={id} // The name attribute is crucial for the handleChange function
+        id={id}
+        value={value ?? ''} // Ensure value is not null/undefined
+        onChange={onChange}
+        placeholder={placeholder}
+        step={step}
+        className="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+      />
     </div>
-  </li>
+  </div>
 );
 
-export default function QuoteProfile() {
-  const { id } = useParams();
-  const { currentUser } = useAuth();
-  const [quote, setQuote] = useState(null);
-  const [config, setConfig] = useState(null);
-  const [loading, setLoading] = useState(true);
+const AdminSelect = ({ label, id, value, onChange, children }) => (
+  <div>
+    <label htmlFor={id} className="block text-sm font-medium text-gray-700">
+      {label}
+    </label>
+    <select
+      id={id}
+      name={id} // The name attribute is crucial for the handleChange function
+      value={value}
+      onChange={onChange}
+      className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+    >
+      {children}
+    </select>
+  </div>
+);
 
-  // --- NEW State for alerts and button ---
+const PriceDisplay = ({ label, value }) => (
+  <div className="py-4 px-6 bg-gray-50 rounded-lg text-center">
+    <div className="text-sm font-medium text-gray-500">{label}</div>
+    <div className="text-3xl font-bold text-gray-900">
+      {value.toLocaleString('en-US', {
+        style: 'currency',
+        currency: 'USD',
+      })}
+    </div>
+  </div>
+);
+
+const SectionWrapper = ({ title, children }) => (
+  <div className="bg-white rounded-lg shadow mb-6">
+    <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
+      <h3 className="text-lg leading-6 font-medium text-gray-900">{title}</h3>
+    </div>
+    <div className="px-4 py-5 sm:p-6 space-y-4">
+      {children}
+    </div>
+  </div>
+);
+
+// --- Main Quote Profile Component ---
+
+function QuoteProfile() {
+  const { id: quoteId } = useParams();
+  const [quoteData, setQuoteData] = useState(null); // The original, saved data
+  const [editableQuoteData, setEditableQuoteData] = useState(null); // The data in the form fields
+  const [configData, setConfigData] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState(null);
   const [alert, setAlert] = useState({ show: false, message: '', isError: false });
-
-  // --- Data Fetching Logic (unchanged) ---
-  useEffect(() => {
-    const fetchQuoteData = async () => {
-      if (!currentUser || !id) return;
-      setLoading(true);
-      try {
-        const quoteRef = doc(db, 'quotes', id);
-        const quoteSnap = await getDoc(quoteRef);
-        if (quoteSnap.exists()) {
-          setQuote(quoteSnap.data());
-        } else {
-          console.error('No such quote found!');
-        }
-
-        const configRef = doc(db, 'config', 'main');
-        const configSnap = await getDoc(configRef);
-        if (configSnap.exists()) {
-          setConfig(configSnap.data());
-        } else {
-          console.error('Config document not found!');
-        }
-      } catch (error) {
-        console.error('Error fetching quote data:', error);
-      } finally {
-        setLoading(false);
+  
+  // ---
+  // Re-usable function to load/reload data
+  // ---
+  const loadData = async () => {
+    try {
+      if (!quoteId) {
+        setError('No quote ID provided.');
+        setIsLoading(false);
+        return;
       }
+      
+      // 1. Fetch the quote document
+      const quoteRef = doc(db, 'quotes', quoteId);
+      const quoteSnap = await getDoc(quoteRef);
+      if (!quoteSnap.exists()) {
+        setError('Quote not found.');
+        setIsLoading(false);
+        return;
+      }
+      const quote = quoteSnap.data();
+      setQuoteData(quote);
+      // Ensure all fields are strings for the form, especially numbers
+      const stringifiedQuote = Object.keys(quote).reduce((acc, key) => {
+        // Don't stringify arrays, keep them as-is
+        if (Array.isArray(quote[key])) {
+          acc[key] = quote[key];
+        } else {
+          acc[key] = String(quote[key] ?? ''); // Convert all other values to strings or empty string
+        }
+        return acc;
+      }, { ...quote }); // Spread quote first to keep non-stringified arrays
+      setEditableQuoteData(stringifiedQuote);
+
+
+      // 2. Fetch the main config
+      const configRef = doc(db, 'config', 'main');
+      const configSnap = await getDoc(configRef);
+      if (!configSnap.exists()) {
+        setError('Business configuration not found.');
+        setIsLoading(false);
+        return;
+      }
+      setConfigData(configSnap.data());
+
+    } catch (err) {
+      console.error("Error loading data:", err);
+      setError(err.message);
+    }
+  };
+
+  // Load all data on mount
+  useEffect(() => {
+    setIsLoading(true);
+    loadData().then(() => {
+      setIsLoading(false);
+    });
+  }, [quoteId]);
+
+  // --- Re-calculate on the fly ---
+  const calculatedFees = useMemo(() => {
+    if (!editableQuoteData || !configData) return null;
+
+    // We must convert editable strings back to numbers for the calculator
+    const numericQuoteData = {
+      ...editableQuoteData,
+      hours: parseFloat(editableQuoteData.hours) || 0,
+      buffer: parseFloat(editableQuoteData.buffer) || 0,
+      discountPct: parseFloat(editableQuoteData.discountPct) || 0,
+      discountUsd: parseFloat(editableQuoteData.discountUsd) || 0,
+    };
+    
+    // Use the client's choices from the quote doc (e.g., "growth", "split_pay")
+    const clientChoices = {
+      tier: editableQuoteData.selectedTier,
+      paymentPlan: editableQuoteData.selectedPaymentPlan,
+      amortizationTerm: parseInt(editableQuoteData.selectedAmortizationTerm, 10),
     };
 
-    fetchQuoteData();
-  }, [currentUser, id]);
-
-  // --- NEW: Handle "Generate Contract" button click ---
-  const handleGenerateContractV2 = async () => {
-    setIsGenerating(true);
-    setAlert({ show: false, message: '', isError: false });
+    if (editableQuoteData.serviceModel === 'project') {
+      return calculateProject(numericQuoteData, configData);
+    }
+    if (editableQuoteData.serviceModel === 'subscription') {
+      return calculateSubscription(numericQuoteData, clientChoices, configData);
+    }
     
-    // First, ensure the quote has selections.
-    // This should only be called by the admin AFTER a client selects.
-    if (!quote.selectedTierId || !quote.selectedPaymentId) {
-      setAlert({ show: true, message: 'Client has not selected a tier or payment plan yet.', isError: true });
-      setIsGenerating(false);
+    return null; // No calculation for Maintenance or Hourly
+
+  }, [editableQuoteData, configData]);
+
+  // --- Regenerate schedule on the fly ---
+  const { schedule } = useMemo(() => {
+    if (!calculatedFees || editableQuoteData.serviceModel !== 'subscription') {
+      return { schedule: [] };
+    }
+    
+    // We need numeric data for the schedule too
+    const numericQuoteData = {
+      ...editableQuoteData,
+      hours: parseFloat(editableQuoteData.hours) || 0,
+      buffer: parseFloat(editableQuoteData.buffer) || 0,
+      discountPct: parseFloat(editableQuoteData.discountPct) || 0,
+      discountUsd: parseFloat(editableQuoteData.discountUsd) || 0,
+      paymentScheduleYears: parseInt(editableQuoteData.paymentScheduleYears, 10) || 2,
+    };
+
+    return generatePaymentSchedule(numericQuoteData, calculatedFees, dateFns);
+
+  }, [editableQuoteData, calculatedFees]);
+
+
+  // Handle changes to the admin inputs
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setEditableQuoteData(prev => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  // --- Save logic ---
+  // A more robust check for changes
+  const isDirty = useMemo(() => {
+    if (!quoteData || !editableQuoteData) return false;
+    // Compare the original data (quoteData) with the string-based form data (editableQuoteData)
+    for (const key in editableQuoteData) {
+      const originalValue = Array.isArray(quoteData[key]) ? JSON.stringify(quoteData[key]) : String(quoteData[key] ?? '');
+      const editableValue = Array.isArray(editableQuoteData[key]) ? JSON.stringify(editableQuoteData[key]) : String(editableQuoteData[key] ?? '');
+      if (originalValue !== editableValue) {
+        return true;
+      }
+    }
+    return false;
+  }, [quoteData, editableQuoteData]);
+
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      // Convert specific fields back to numbers before saving
+      const dataToSave = {
+        ...editableQuoteData,
+        // Tinker Toy
+        hours: parseFloat(editableQuoteData.hours) || 0,
+        buffer: parseFloat(editableQuoteData.buffer) || 0,
+        discountPct: parseFloat(editableQuoteData.discountPct) || 0,
+        discountUsd: parseFloat(editableQuoteData.discountUsd) || 0,
+        paymentScheduleYears: parseInt(editableQuoteData.paymentScheduleYears, 10) || 2,
+        // Maintenance
+        finalMonthlyFee: parseFloat(editableQuoteData.finalMonthlyFee) || 0,
+        includedHours: parseFloat(editableQuoteData.includedHours) || 0,
+        // Hourly
+        finalTotalCost: parseFloat(editableQuoteData.finalTotalCost) || 0,
+        // Keep arrays as arrays
+        contractDocs: editableQuoteData.contractDocs || [], 
+      };
+
+      const quoteRef = doc(db, 'quotes', quoteId);
+      await updateDoc(quoteRef, dataToSave);
+      
+      // We must re-set the *original* data to what we just saved
+      setQuoteData(dataToSave); 
+      // Re-run the stringification logic
+      const stringifiedQuote = Object.keys(dataToSave).reduce((acc, key) => {
+        if (Array.isArray(dataToSave[key])) {
+          acc[key] = dataToSave[key];
+        } else {
+          acc[key] = String(dataToSave[key] ?? '');
+        }
+        return acc;
+      }, { ...dataToSave });
+      setEditableQuoteData(stringifiedQuote);
+
+      setAlert({ show: true, message: 'Quote updated successfully!', isError: false });
+
+    } catch (err) {
+      console.error("Error saving data:", err);
+      setAlert({ show: true, message: `Failed to save: ${err.message}`, isError: true });
+    }
+    setIsSaving(false);
+  };
+
+  // --- Contract Generation ---
+  const handleGenerateContracts = async () => {
+    if (isDirty) {
+      setAlert({ show: true, message: 'Please save your changes before generating contracts.', isError: true });
       return;
     }
-
+    setIsGenerating(true);
     try {
-      // 1. Call the cloud function
-      const result = await generateContractV2({ quoteId: id });
+      const generateContractV2 = httpsCallable(functions, 'generateContractV2');
+      const result = await generateContractV2({ quoteId: quoteId });
       
-      // 2. Refresh the quote data from Firestore to get new status
-      const quoteRef = doc(db, 'quotes', id);
-      const quoteSnap = await getDoc(quoteRef);
-      if (quoteSnap.exists()) {
-        setQuote(quoteSnap.data());
+      // @ts-ignore
+      const { contractUrl, message } = result.data;
+      if (contractUrl) {
+         setAlert({ show: true, message: `Contracts generated!`, isError: false });
+         // Refresh the data to show new contract status/links
+         await loadData();
+      } else {
+        throw new Error(message || 'Failed to generate contract.');
       }
-      
-      // 3. Show success alert
-      setAlert({ show: true, message: 'Contracts generated successfully! The page will now reflect the new "Signed" status and show contract links.', isError: false });
-      
     } catch (err) {
-      console.error("Error generating contract:", err);
-      setAlert({ show: true, message: `Failed to generate contracts: ${err.message}`, isError: true });
+      console.error("Error generating contracts:", err);
+      // @ts-ignore
+      const errorMessage = err.message || 'An unknown error occurred.';
+      setAlert({ show: true, message: `Generation failed: ${errorMessage}`, isError: true });
     }
     setIsGenerating(false);
   };
 
 
-  if (loading) {
+  // --- Render Logic ---
+  if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full p-8">
-        <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
       </div>
     );
   }
 
-  if (!quote || !config) {
-    // ... (Error display unchanged)
+  if (error) {
     return (
-      <div className="p-8 text-center text-red-500">
-        <AlertCircle className="w-12 h-12 mx-auto" />
-        <h2 className="mt-2 text-xl font-semibold">Error</h2>
-        <p>Could not load quote or configuration data.</p>
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto" />
+          <h2 className="mt-4 text-xl font-semibold text-gray-800">Error loading quote</h2>
+          <p className="text-gray-600">{error}</p>
+        </div>
       </div>
     );
   }
-
-  // --- Data Mapping (unchanged) ---
-  const selectedTier = config.tiers.find(
-    (t) => t.id === quote.selectedTierId,
-  );
-  const selectedPlan = config.paymentPlans.find(
-    (p) => p.id === quote.selectedPaymentId,
-  );
   
-  // --- Check if contract is ready to be generated ---
-  const canGenerate = quote.selectedTierId && quote.selectedPaymentId && quote.status !== 'Signed';
-  const isSigned = quote.status === 'Signed';
+  if (!editableQuoteData || !configData) {
+     return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
+      </div>
+    );
+  }
+  
+  const modelName = configData.models[editableQuoteData.serviceModel]?.display_name || 'Quote';
+
+  const isTinkerToy = editableQuoteData.serviceModel === 'subscription' || editableQuoteData.serviceModel === 'project';
+  
+  // ---
+  // NEW: Check if there are any contracts to display
+  // ---
+  const hasContracts = editableQuoteData.contractDocs && editableQuoteData.contractDocs.length > 0;
 
   return (
-    <> {/* --- Wrap in Fragment --- */}
-      <div className="p-6 md:p-10 bg-gray-50 min-h-screen">
-        {/* --- Header Section (unchanged) --- */}
-        <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-200 mb-8">
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between">
-            <div className="mb-4 md:mb-0">
-              <h1 className="text-4xl font-bold text-gray-800">
-                {quote.clientName || 'Unnamed Quote'}
-              </h1>
-              <p className="text-lg text-gray-500">
-                {quote.email || 'No email provided'}
-              </p>
-              <span
-                className={`mt-2 inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(
-                  quote.status,
-                )}`}
-              >
-                Status: {quote.status || 'N/A'}
-              </span>
-
-              {quote.pdfUrl && (
-                <div className="mt-4">
-                  <a
-                    href={quote.pdfUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    <FileDown className="h-5 w-5 mr-2" />
-                    Download PDF Quote
-                  </a>
-                </div>
+    <>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="max-w-7xl mx-auto py-10 px-4 sm:px-6 lg:px-8"
+      >
+        {/* --- Header & Action Buttons --- */}
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">
+              {modelName}: {editableQuoteData.clientContactName || "No Name"}
+            </h1>
+            <p className="text-sm text-gray-500">Quote ID: {quoteId}</p>
+          </div>
+          <div className="flex space-x-3">
+            <AnimatePresence>
+              {isDirty && (
+                <motion.button
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 10 }}
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none disabled:opacity-50"
+                >
+                  <Save className="w-5 h-5 mr-2" />
+                  {isSaving ? 'Saving...' : 'Save Changes'}
+                </motion.button>
               )}
-            </div>
-            <div className="text-left md:text-right">
-              <p className="text-gray-500 text-lg">Total Quote Value</p>
-              <p className="text-5xl font-bold text-blue-600">
-                {quote.totalValue ? `$${quote.totalValue.toFixed(2)}` : 'N/A'}
-              </p>
-            </div>
+            </AnimatePresence>
+            <button
+              onClick={handleGenerateContracts}
+              disabled={isGenerating || isDirty}
+              className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none disabled:opacity-50"
+            >
+              <FileText className="w-5 h-5 mr-2" />
+              {isGenerating ? 'Generating...' : 'Generate Contract(s)'}
+            </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-          {/* --- Selected Package Section (unchanged) --- */}
-          <div className="lg:col-span-2">
-            <h2 className="text-3xl font-bold text-gray-800 mb-4">
-              Selected Package
-            </h2>
-            {selectedTier ? (
-              // ... (package details UI unchanged)
-              <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-200">
-                <h3 className="font-bold text-xl text-gray-900 mb-1">
-                  {selectedTier.name}
-                </h3>
-                <p className="text-gray-600 mb-4 italic p-3 bg-gray-50 rounded-lg">
-                  Payment Plan: {selectedPlan ? selectedPlan.name : 'N/A'}
-                </p>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8">
-                  <div className="space-y-2 text-sm">
-                    <h4 className="font-semibold text-lg text-gray-700 mb-2">
-                      Included Features
-                    </h4>
-                    <ul className="list-disc list-inside text-gray-600 space-y-1">
-                      {selectedTier.features
-                        .split('\n')
-                        .map((feature, i) => (
-                          <li key={i} className="flex items-center">
-                            <CheckCircle className="w-4 h-4 mr-2 text-green-500 flex-shrink-0" />
-                            <span>{feature}</span>
-                          </li>
-                        ))}
-                    </ul>
-                  </div>
-                  <div className="mt-6 lg:mt-0">
-                    <h4 className="font-semibold text-lg text-gray-700 mb-2">
-                      Price Breakdown
-                    </h4>
-                    <ul className="space-y-2">
-                      <li className="flex justify-between items-center bg-gray-50 p-3 rounded-md">
-                        <span className="text-gray-800 font-medium">
-                          Setup Fee
-                        </span>
-                        <span className="font-bold text-lg text-gray-900">
-                          ${quote.setupFee ? quote.setupFee.toFixed(2) : '0.00'}
-                        </span>
-                      </li>
-                      <li className="flex justify-between items-center bg-gray-50 p-3 rounded-md">
-                        <span className="text-gray-800 font-medium">
-                          Monthly Fee
-                        </span>
-                        <span className="font-bold text-lg text-gray-900">
-                          ${quote.monthlyFee ? quote.monthlyFee.toFixed(2) : '0.00'}
-                        </span>
-                      </li>
-                    </ul>
-                  </div>
+        {/* --- Main Grid --- */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* --- Left Column: Admin Inputs --- */}
+          <div className="lg:col-span-1 space-y-6">
+            <SectionWrapper title="Client Details">
+              <AdminInput
+                label="Client Contact Name"
+                id="clientContactName" 
+                value={editableQuoteData.clientContactName}
+                onChange={handleChange}
+              />
+              <AdminInput
+                label="Client Email"
+                id="email"
+                type="email"
+                value={editableQuoteData.email}
+                onChange={handleChange}
+              />
+            </SectionWrapper>
+            
+            {/* --- Conditional Admin Panels --- */}
+
+            {(editableQuoteData.serviceModel === 'subscription' || editableQuoteData.serviceModel === 'project') && (
+              <SectionWrapper title="Tinker Toy Variables">
+                <div className="grid grid-cols-2 gap-4">
+                  <AdminInput
+                    label="Project Hours"
+                    id="hours"
+                    type="number"
+                    value={editableQuoteData.hours}
+                    onChange={handleChange}
+                  />
+                  <AdminInput
+                    label="Contingency Buffer (%)"
+                    id="buffer"
+                    type="number"
+                    value={editableQuoteData.buffer}
+                    onChange={handleChange}
+                  />
                 </div>
-              </div>
-            ) : (
-              <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-200">
-                <p className="text-center text-gray-500">
-                  No package has been selected for this quote yet.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* --- Client Info & Actions Column --- */}
-          <div className="lg:col-span-1">
-            <h2 className="text-3xl font-bold text-gray-800 mb-4">
-              Actions
-            </h2>
-            {/* --- NEW Action Button --- */}
-            <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-200 mb-8">
-              <button
-                type="button"
-                onClick={handleGenerateContractV2}
-                disabled={!canGenerate || isGenerating}
-                className="w-full flex justify-center items-center px-4 py-3 text-base font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              >
-                {isGenerating ? (
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                ) : (
-                  <FileSignature className="w-5 h-5 mr-2" />
-                )}
-                {isGenerating ? 'Generating...' : 'Generate Contract'}
-              </button>
-              {!canGenerate && !isSigned && (
-                <p className="mt-2 text-xs text-center text-gray-500">
-                  Client must select a tier and plan on their link before you can generate a contract.
-                </p>
-              )}
-              {isSigned && (
-                 <p className="mt-2 text-xs text-center text-green-600">
-                  Contracts have already been generated for this quote.
-                </p>
-              )}
-            </div>
-
-            {/* --- NEW: Generated Contracts List --- */}
-            {isSigned && quote.contractDocs && (
-              <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-200 mb-8">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">
-                  Generated Contracts
-                </h3>
-                <ul className="space-y-3">
-                  {quote.contractDocs.map((doc) => (
-                    <li key={doc.name}>
-                      <a
-                        href={doc.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-between p-3 bg-gray-50 rounded-md hover:bg-gray-100"
+                <div className="grid grid-cols-2 gap-4">
+                  <AdminInput
+                    label="Discount (%)"
+                    id="discountPct"
+                    type="number"
+                    value={editableQuoteData.discountPct}
+                    onChange={handleChange}
+                  />
+                  <AdminInput
+                    label="Discount ($)"
+                    id="discountUsd"
+                    type="number"
+                    value={editableQuoteData.discountUsd}
+                    onChange={handleChange}
+                  />
+                </div>
+                {editableQuoteData.serviceModel === 'subscription' && (
+                  <>
+                    <div className="pt-2 border-t border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <CalendarRange className="w-5 h-5 text-gray-500" />
+                        <h4 className="text-md font-medium text-gray-800">Billing & Schedule</h4>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <AdminSelect
+                        label="Billing Schedule"
+                        id="billingSchedule"
+                        value={editableQuoteData.billingSchedule}
+                        onChange={handleChange}
                       >
-                        <span className="font-medium text-blue-600">{doc.name}</span>
-                        <FileDown className="w-5 h-5 text-gray-400" />
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+                        <option value="standard">Standard</option>
+                        <option value="seasonal">Seasonal</option>
+                      </AdminSelect>
+                      <AdminInput
+                        label="First Payment (YYYY-MM)"
+                        id="amortStartMonth"
+                        value={editableQuoteData.amortStartMonth}
+                        onChange={handleChange}
+                      />
+                    </div>
+                    {editableQuoteData.billingSchedule === 'seasonal' && (
+                       <div className="space-y-4">
+                          <AdminInput
+                            label="Year 1 Range (YYYY-MM:YYYY-MM)"
+                            id="yr1SeasonalRange"
+                            value={editableQuoteData.yr1SeasonalRange}
+                            onChange={handleChange}
+                          />
+                           <AdminInput
+                            label="Year 2+ Start (YYYY-MM)"
+                            id="yr2StartDate"
+                            value={editableQuoteData.yr2StartDate}
+                            onChange={handleChange}
+                          />
+                           <AdminInput
+                            label="Year 2+ Range (YYYY-MM:YYYY-MM)"
+                            id="yr2SeasonalRange"
+                            value={editableQuoteData.yr2SeasonalRange}
+                            onChange={handleChange}
+                          />
+                       </div>
+                    )}
+                  </>
+                )}
+              </SectionWrapper>
+            )}
+
+            {editableQuoteData.serviceModel === 'maintenance' && (
+              <SectionWrapper title="Maintenance Variables">
+                <AdminInput
+                  label="Monthly Fee ($)"
+                  id="finalMonthlyFee"
+                  type="number"
+                  value={editableQuoteData.finalMonthlyFee}
+                  onChange={handleChange}
+                />
+                <AdminInput
+                  label="Included Hours / mo"
+                  id="includedHours"
+                  type="number"
+                  value={editableQuoteData.includedHours}
+                  onChange={handleChange}
+                />
+              </SectionWrapper>
+            )}
+
+            {editableQuoteData.serviceModel === 'hourly' && (
+              <SectionWrapper title="Hourly Variables">
+                <AdminInput
+                  label="Estimated Hours"
+                  id="hours"
+                  type="number"
+                  value={editableQuoteData.hours}
+                  onChange={handleChange}
+                />
+                <PriceDisplay
+                  label="Calculated Total"
+                  value={(parseFloat(editableQuoteData.hours) || 0) * (configData.base_rates.hourly_rate || 0)}
+                />
+              </SectionWrapper>
             )}
             
-            {/* --- Client Info (unchanged) --- */}
-            <h2 className="text-3xl font-bold text-gray-800 mb-4">
-              Client & Project Info
-            </h2>
-            <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-200">
-              <ul className="divide-y divide-gray-200">
-                {/* ... (InfoItem list unchanged) ... */}
-                <InfoItem
-                  icon={<User className="w-5 h-5" />}
-                  label="Client Name"
-                  value={quote.clientName}
+          </div>
+
+          {/* --- Right Column: Summary / Preview --- */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* --- Conditional Preview Panel --- */}
+            
+            {(editableQuoteData.serviceModel === 'subscription' || editableQuoteData.serviceModel === 'project') && calculatedFees && (
+              <SectionWrapper title="Live Quote Preview">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <PriceDisplay
+                    label="Due Today"
+                    value={calculatedFees.setupFee}
+                  />
+                  <PriceDisplay
+                    label="Total Monthly"
+                    value={calculatedFees.totalActiveMonthly}
+                  />
+                  <PriceDisplay
+                    label={editableQuoteData.serviceModel === 'subscription' ? 'Buyout Price' : 'Total Project Cost'}
+                    value={editableQuoteData.serviceModel === 'subscription' ? calculatedFees.buyoutPrice : calculatedFees.totalCost}
+                  />
+                </div>
+                
+                {schedule.length > 0 && (
+                  <div className="pt-4 border-t">
+                    <h4 className="text-md font-medium text-gray-800 mb-2">Payment Schedule Preview</h4>
+                    {/* A simple schedule view for admin */}
+                    <div className="max-h-60 overflow-y-auto border rounded-md">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <tbody className="divide-y divide-gray-200 bg-white">
+                          {schedule.slice(0, 13).map((item, index) => ( // Show first 13 rows (setup + 1 year)
+                            <tr key={index} className={item.notes.startsWith('Total') ? 'bg-gray-50 font-medium' : ''}>
+                              <td className="px-4 py-2 text-sm font-medium text-gray-900">{item.date}</td>
+                              <td className="px-4 py-2 text-sm text-gray-500">{item.notes}</td>
+                              <td className="px-4 py-2 text-sm text-gray-500 text-right">
+                                {item.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </SectionWrapper>
+            )}
+            
+            {editableQuoteData.serviceModel === 'maintenance' && (
+              <SectionWrapper title="Quote Summary">
+                <PriceDisplay
+                  label="Monthly Retainer Fee"
+                  value={parseFloat(editableQuoteData.finalMonthlyFee) || 0}
                 />
-                <InfoItem
-                  icon={<Mail className="w-5 h-5" />}
-                  label="Client Email"
-                  value={quote.email || 'N/A'}
+              </SectionWrapper>
+            )}
+            
+            {editableQuoteData.serviceModel === 'hourly' && (
+              <SectionWrapper title="Quote Summary">
+                <PriceDisplay
+                  label="Estimated Total Cost"
+                  value={(parseFloat(editableQuoteData.hours) || 0) * (configData.base_rates.hourly_rate || 0)}
                 />
-                <InfoItem
-                  icon={<Clock className="w-5 h-5" />}
-                  label="Project Hours"
-                  value={quote.hours || 'N/A'}
-                />
-                <InfoItem
-                  icon={<DollarSign className="w-5 h-5" />}
-                  label="Discount"
-                  value={quote.discountPct ? `${quote.discountPct}%` : '0%'}
-                />
-                <InfoItem
-                  icon={<ClipboardList className="w-5 h-5" />}
-                  label="Quote ID"
-                  value={id}
-                />
-              </ul>
-            </div>
+              </SectionWrapper>
+            )}
+
+            {/* --- Status & Links --- */}
+            <SectionWrapper title="Quote Status & Links">
+                <p>Status: <span className='font-medium text-gray-800'>{editableQuoteData.status}</span></p>
+                {isTinkerToy && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Client Calculator Link</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${window.location.origin}/quote/${quoteId}`}
+                        className="mt-1 block w-full px-3 py-2 text-gray-500 bg-gray-100 border border-gray-300 rounded-md shadow-sm"
+                        onFocus={(e) => e.target.select()}
+                      />
+                      <button 
+                        type="button" 
+                        className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-blue-600"
+                        onClick={() => navigator.clipboard.writeText(`${window.location.origin}/quote/${quoteId}`)}
+                      >
+                        <Link className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ---
+                  NEW SECTION: Display Generated Documents
+                  --- */}
+                {hasContracts && (
+                  <div className="pt-4 border-t border-gray-200">
+                    <h4 className="text-md font-medium text-gray-800">Generated Documents</h4>
+                    <div className="mt-2 space-y-2">
+                      {editableQuoteData.contractDocs.map((doc, index) => (
+                        <a
+                          key={index}
+                          href={doc.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100"
+                        >
+                          <Download className="w-4 h-4 mr-2" />
+                          Download {doc.name}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+            </SectionWrapper>
+            
           </div>
         </div>
-      </div>
+      </motion.div>
 
-      {/* --- Alert Modal for feedback --- */}
       <AlertModal
         isOpen={alert.show}
         onClose={() => setAlert({ ...alert, show: false })}
-        title={alert.isError ? 'Error Occurred' : 'Success'}
+        title={alert.isError ? 'Error' : 'Success'}
         message={alert.message}
         icon={
           alert.isError ? (
@@ -376,3 +691,5 @@ export default function QuoteProfile() {
     </>
   );
 }
+
+export default QuoteProfile;

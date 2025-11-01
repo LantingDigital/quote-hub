@@ -43,101 +43,151 @@ const navContainerVariants = {
 };
 
 const textVariants = {
-  initial: { opacity: 0, x: -10 },
-  animate: { opacity: 1, x: 0 },
-  exit: { opacity: 0, x: 10 },
+  hidden: {
+    opacity: 0,
+    x: -10,
+    transition: {
+      type: 'spring',
+      damping: 15,
+      stiffness: 100,
+      duration: 0.1,
+    },
+  },
+  visible: {
+    opacity: 1,
+    x: 0,
+    transition: {
+      type: 'spring',
+      damping: 15,
+      stiffness: 100,
+      duration: 0.1,
+      delay: 0.1,
+    },
+  },
 };
 
-export default function Sidebar({ isMobileMenuOpen, onLinkClick, isReordering }) {
-  const [isHovered, setIsHovered] = useState(false);
-  const isDesktop = useMediaQuery('(min-width: 1024px)');
-  const scrollDirection = useScrollDirection();
+// --- NOTE: 'isReordering' prop removed from here ---
+function Sidebar({ isMobileMenuOpen, onLinkClick }) {
+  const [isHovering, setIsHovering] = useState(false);
   const { currentUser, logout } = useAuth();
-  const { profile } = useProfile();
+  const { isReordering: isContextReordering } = useProfile(); // This is from context, for drag-and-drop
   const navigate = useNavigate();
+  const isMediumScreen = useMediaQuery('(min-width: 768px)');
 
-  // --- Text Updated ---
-  const projectName = profile?.companyName || 'Quote Hub'; // Was 'Hiring'
-  const logoUrl = profile?.logoUrl;
-  const firstLetter = projectName ? projectName.charAt(0).toUpperCase() : 'Q'; // Was 'H'
+  // --- NOTE: 'isReordering' variable removed from this logic ---
+  const isExpanded =
+    (isMediumScreen && (isHovering || isContextReordering)) ||
+    (!isMediumScreen && isMobileMenuOpen);
 
   const handleLogout = async () => {
     try {
       await logout();
       navigate('/login');
     } catch (error) {
-      console.error('Failed to log out', error);
+      console.error('Failed to log out:', error);
     }
   };
 
-  const isExpanded = (isDesktop && isHovered && !isReordering) || isMobileMenuOpen;
-  const isVisible = isDesktop || isMobileMenuOpen;
-  
-  const navLinkClasses = ({ isActive }) =>
-    `flex items-center h-14 px-6 transition-colors duration-200 
-     ${isActive ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white'}`;
-
-  const renderCollapsedIcon = () => {
-    if (logoUrl) {
-      return (
-        <img 
-          src={logoUrl} 
-          alt={`${projectName} Logo`} 
-          className="h-10 w-10 rounded-full object-cover" 
-        />
-      );
+  const navLinkClasses = ({ isActive }) => {
+    let baseClasses =
+      'flex items-center h-14 px-6 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white';
+    if (isActive) {
+      return `${baseClasses} bg-gray-900 text-white`; // Active state
     }
-    return (
-      <span className="text-3xl font-bold">{firstLetter}</span>
-    );
+    return `${baseClasses} text-gray-400 hover:bg-gray-700 hover:text-white`; // Inactive state
   };
 
   return (
     <motion.div
-      layout
+      // Desktop: Animate width based on hover state
+      // Mobile: Animate width based on mobile menu toggle
       animate={isExpanded ? 'expanded' : 'collapsed'}
       variants={sidebarVariants}
-      initial={false}
       className={`
-        bg-gray-800 text-white flex flex-col overflow-hidden
-        ${isDesktop ? 'sticky top-0 h-screen' : 'fixed top-0 left-0 h-full z-20'}
-        ${isVisible ? 'translate-x-0' : '-translate-x-full'}
+        bg-gray-800 text-white 
+        hidden md:flex flex-col flex-shrink-0 
+        relative z-20 
       `}
-      onMouseEnter={() => isDesktop && setIsHovered(true)}
-      onMouseLeave={() => isDesktop && setIsHovered(false)}
+      onHoverStart={() => {
+        if (isMediumScreen) setIsHovering(true);
+      }}
+      onHoverEnd={() => {
+        if (isMediumScreen) setIsHovering(false);
+      }}
     >
-      <motion.div
-        variants={headerVariants}
-        animate={scrollDirection === 'down' && isDesktop ? 'hidden' : 'visible'}
-        transition={{ duration: 0.2, ease: 'easeInOut' }}
-        className="flex items-center justify-center h-20 border-b border-gray-700 shrink-0 relative"
-      >
-        <AnimatePresence mode="wait" initial={false}>
+      {/* Mobile Menu (Overlay) */}
+      <AnimatePresence>
+        {!isMediumScreen && isMobileMenuOpen && (
           <motion.div
-            key={isExpanded ? 'projectName' : 'firstLetter'}
-            variants={textVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            transition={{ duration: 0.15 }}
-            className="absolute flex items-center justify-center"
+            initial={{ x: '-100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '-100%' }}
+            transition={{ type: 'spring', damping: 20, stiffness: 150 }}
+            className="
+              absolute top-0 left-0 h-screen w-64 
+              bg-gray-800 text-white 
+              flex flex-col z-30 
+              md:hidden shadow-lg
+            "
           >
-            {isExpanded ? <span className="text-2xl font-bold whitespace-nowrap">{projectName}</span> : renderCollapsedIcon()}
+            {/* --- Mobile Header --- */}
+            <div className="flex items-center justify-between h-20 border-b border-gray-700 px-6">
+              <span className="text-xl font-semibold text-white">Quote Hub</span>
+              <button onClick={onLinkClick} className="text-gray-400 hover:text-white">
+                <XMarkIcon className="h-7 w-7" />
+              </button>
+            </div>
+            {/* --- Mobile Nav --- */}
+            <nav className="flex-1 py-6 space-y-2">
+              <NavLink to="/" className={navLinkClasses} onClick={onLinkClick}>
+                <HomeIcon className="h-6 w-6 shrink-0" />
+                <span className="ml-5 font-medium">Dashboard</span>
+              </NavLink>
+              <NavLink to="/quotes" className={navLinkClasses} onClick={onLinkClick}>
+                {/* --- Icon Updated --- */}
+                <FileSearch className="h-6 w-6 shrink-0" />
+                <span className="ml-5 font-medium">All Quotes</span>
+              </NavLink>
+              {/* --- Link Updated --- */}
+              <NavLink to="/config" className={navLinkClasses} onClick={onLinkClick}>
+                {/* --- Icon Updated --- */}
+                <Settings className="h-6 w-6 shrink-0" />
+                <span className="ml-5 font-medium">Product Manager</span>
+              </NavLink>
+            </nav>
+            {/* --- Mobile Footer --- */}
+            <div className="border-t border-gray-700">
+              {currentUser && (
+                <div 
+                  className="flex items-center h-14 px-6 text-gray-400 text-sm overflow-hidden text-ellipsis"
+                  title={currentUser.email}
+                >
+                  {currentUser.email}
+                </div>
+              )}
+              <button onClick={handleLogout} className={navLinkClasses({isActive: false}) + ' w-full'}>
+                {/* --- Icon Updated --- */}
+                <LogOut className="h-6 w-6 shrink-0" />
+                <span className="ml-5 font-medium">Log Out</span>
+              </button>
+            </div>
           </motion.div>
-        </AnimatePresence>
-
-        {!isDesktop && (
-          <button onClick={onLinkClick} className="absolute top-6 right-6">
-            <XMarkIcon className="h-8 w-8 text-white" />
-          </button>
         )}
-      </motion.div>
+      </AnimatePresence>
+
+      {/* --- Desktop Sidebar (Permanent) --- */}
+      <div className="flex items-center justify-center h-20 border-b border-gray-700 shrink-0">
+        <motion.span
+          animate={{ opacity: isExpanded ? 1 : 0 }}
+          className="text-xl font-semibold text-white whitespace-nowrap"
+        >
+          Quote Hub
+        </motion.span>
+      </div>
 
       <motion.nav
+        className="flex-1 py-6 space-y-2"
         variants={navContainerVariants}
-        animate={scrollDirection === 'down' && isDesktop ? 'hidden' : 'visible'}
-        transition={{ duration: 0.2, ease: 'easeInOut' }}
-        className="flex-1 pt-4"
       >
         <NavLink to="/" className={navLinkClasses} onClick={onLinkClick}>
           <HomeIcon className="h-6 w-6 shrink-0" />
@@ -145,16 +195,14 @@ export default function Sidebar({ isMobileMenuOpen, onLinkClick, isReordering })
             Dashboard
           </motion.span>
         </NavLink>
-        
-        {/* --- Link 1 Updated --- */}
         <NavLink to="/quotes" className={navLinkClasses} onClick={onLinkClick}>
+          {/* --- Icon Updated --- */}
           <FileSearch className="h-6 w-6 shrink-0" />
           <motion.span animate={{ opacity: isExpanded ? 1 : 0 }} className="ml-5 font-medium whitespace-nowrap">
-            Quotes
+            All Quotes
           </motion.span>
         </NavLink>
-        
-        {/* --- Link 2 Updated --- */}
+        {/* --- Link Updated --- */}
         <NavLink to="/config" className={navLinkClasses} onClick={onLinkClick}>
           <Settings className="h-6 w-6 shrink-0" />
           <motion.span animate={{ opacity: isExpanded ? 1 : 0 }} className="ml-5 font-medium whitespace-nowrap">
@@ -190,7 +238,8 @@ export default function Sidebar({ isMobileMenuOpen, onLinkClick, isReordering })
           </motion.span>
         </button>
       </div>
-
     </motion.div>
   );
 }
+
+export default Sidebar;
