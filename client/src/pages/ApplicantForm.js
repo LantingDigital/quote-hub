@@ -3,9 +3,8 @@ automated-hiring-funnel/client/src/pages/ApplicantForm.js
 ---
 MODIFIED:
 - Renamed to QuoteCalculator.js (as per context.txt)
-- TASK 1.8.1: Changed "Accept & Generate Contract" to "Submit Quote"
-- Refactored state/handlers from 'isAccepting' to 'isSubmitting'
-- Changed status update from 'Accepted' to 'Submitted'
+- TASK (Plan Step 2): Changed status update on submit
+  from 'Submitted' to 'Approved' to align with new lifecycle.
 */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -14,7 +13,7 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db, functions } from '../firebase'; // Assuming 'functions' export for HttpsCallable
 import { httpsCallable } from 'firebase/functions';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, CheckCircle, AlertCircle, ShieldCheck, Send } from 'lucide-react'; // Import Send icon
+import { Loader2, CheckCircle, AlertCircle, ShieldCheck, Send } from 'lucide-react';
 import {
   calculateSubscription,
   calculateProject,
@@ -136,20 +135,14 @@ function QuoteCalculator() {
   const [configData, setConfigData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  
-  // --- STATE REFACTOR (Task 1) ---
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionSuccess, setSubmissionSuccess] = useState(false);
-  // --- End Refactor ---
-
-  // We no longer set contractUrl here, the admin will generate it.
-  // const [contractUrl, setContractUrl] = useState(null); 
 
   const [clientChoices, setClientChoices] = useState({
-    serviceModel: 'subscription', // 'subscription' or 'project'
-    tier: '', // e.g., 'foundation'
-    paymentPlan: '', // e.g., 'flex_start'
-    amortizationTerm: 0, // Set to 0, will be updated by config
+    serviceModel: 'subscription', 
+    tier: '', 
+    paymentPlan: '', 
+    amortizationTerm: 0, 
   });
 
   // Load all data on mount
@@ -173,11 +166,17 @@ function QuoteCalculator() {
         const quote = quoteSnap.data();
         
         // --- CHECK STATUS ---
-        // If quote is already submitted, show success screen
-        if (quote.status === 'Submitted' || quote.status === 'Accepted' || quote.status === 'Contract Generated') {
+        // If quote is already approved or further, show success screen
+        if (quote.status === 'Approved' || quote.status === 'Contract Generated') {
           setSubmissionSuccess(true);
           setIsLoading(false);
           return;
+        }
+        // If quote is not "Sent", show an error (client shouldn't have this link)
+        if (quote.status !== 'Sent') {
+           setError('This quote is not yet active. Please contact us if you believe this is an error.');
+           setIsLoading(false);
+           return;
         }
         // --- End Check ---
         
@@ -241,14 +240,13 @@ function QuoteCalculator() {
 
   }, [quoteData, calculatedFees, clientChoices.serviceModel]);
 
-  // --- HANDLER REFACTOR (Task 1) ---
   const handleSubmitQuote = async () => {
     setIsSubmitting(true);
     setError(null);
     try {
       // 1. Update the quote doc with the final selections and new status
       await updateDoc(doc(db, 'quotes', quoteId), {
-        status: 'Submitted', // <-- TASK 1 CHANGE
+        status: 'Approved', // <-- TASK (Plan Step 2) CHANGE
         selectedServiceModel: clientChoices.serviceModel,
         selectedTier: clientChoices.tier,
         selectedPaymentPlan: clientChoices.paymentPlan,
@@ -256,21 +254,17 @@ function QuoteCalculator() {
         finalSetupFee: calculatedFees.setupFee,
         finalMonthlyFee: calculatedFees.totalActiveMonthly,
         finalTotalCost: totalCost,
-        lastSubmittedAt: new Date(), // Add a timestamp for tracking
+        lastSubmittedAt: new Date(), 
       });
       
-      // 2. No longer call cloud function. Just show success.
-      // The admin will now be responsible for generating the contract.
       setSubmissionSuccess(true);
       
     } catch (err) {
       console.error("Error submitting quote:", err);
       setError(err.message);
-      setIsSubmitting(false); // Only set to false on error
+      setIsSubmitting(false); 
     }
-    // On success, we transition to the success screen
   };
-  // --- End Refactor ---
   
 
   // --- Render Logic ---
@@ -295,8 +289,6 @@ function QuoteCalculator() {
     );
   }
 
-  // --- SUCCESS SCREEN (Task 1) ---
-  // This screen now handles both submission and contract generated states
   if (submissionSuccess) {
      return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
@@ -308,19 +300,14 @@ function QuoteCalculator() {
           <CheckCircle className="w-16 h-16 text-green-500 mx-auto" />
           <h2 className="mt-6 text-2xl font-bold text-gray-900">Thank You!</h2>
           <p className="mt-2 text-gray-600">
-            Your quote selections have been submitted. We are reviewing your
+            Your quote selections have been submitted for approval. We are reviewing your
             details and will be in touch shortly with your finalized
             contract documents.
           </p>
-          {/* This component no longer holds the contract URL.
-            We can add this back later in Phase 2 when the client
-            has a portal to log into and view their generated contracts.
-          */}
         </motion.div>
       </div>
     );
   }
-  // --- End Success Screen ---
 
   if (!quoteData || !configData || !calculatedFees) {
     return (
@@ -517,7 +504,7 @@ function QuoteCalculator() {
             <ScheduleTable schedule={schedule} />
           </div>
 
-          {/* --- SUBMIT CARD (Task 1) --- */}
+          {/* --- SUBMIT CARD --- */}
           <div className="p-6 bg-blue-50 rounded-lg shadow-lg border border-blue-200">
             <div className="flex items-start">
               <div className="flex-shrink-0">
@@ -527,13 +514,11 @@ function QuoteCalculator() {
                 <h2 className="text-2xl font-bold text-gray-900">
                   Ready to proceed?
                 </h2>
-                {/* --- TEXT CHANGE (Task 1) --- */}
                 <p className="mt-2 text-gray-700">
-                  By clicking "Submit Quote", you are agreeing to
-                  the terms outlined in this quote. We will then review your
-                  selections and prepare your final contract documents.
+                  By clicking "Submit Quote", you are submitting your selections
+                  for final review. We will then prepare your
+                  final contract documents.
                 </p>
-                {/* --- BUTTON CHANGE (Task 1) --- */}
                 <button
                   onClick={handleSubmitQuote}
                   disabled={isSubmitting}
@@ -542,7 +527,7 @@ function QuoteCalculator() {
                   {isSubmitting ? (
                     <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                   ) : (
-                    <Send className="w-5 h-5 mr-2" /> // Using 'Send' icon
+                    <Send className="w-5 h-5 mr-2" />
                   )}
                   {isSubmitting ? 'Submitting...' : 'Submit Quote'}
                 </button>

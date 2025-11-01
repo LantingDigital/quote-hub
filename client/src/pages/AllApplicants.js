@@ -1,5 +1,11 @@
 /*
 automated-hiring-funnel/client/src/pages/AllApplicants.js
+---
+MODIFIED:
+- Renamed to AllQuotes.js (as per context.txt)
+- TASK (Plan Step 4): Replaced the local 'formatStatus' function
+  with the new reusable 'StatusBadge' component to ensure
+  visual consistency.
 */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -9,21 +15,10 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Loader2, FileSearch, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import emptyStateImage from '../assets/empty-state.png'; // Re-using the empty state image
+import emptyStateImage from '../assets/empty-state.png';
+import StatusBadge from '../components/StatusBadge'; // <-- TASK: Import new component
 
-// Helper to format the status
-const formatStatus = (status) => {
-  switch (status) {
-    case 'Pending':
-      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">Pending</span>;
-    case 'Accepted':
-      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Accepted</span>;
-    case 'Signed':
-      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">Signed</span>;
-    default:
-      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">{status}</span>;
-  }
-};
+// --- TASK: Deleted the old, local formatStatus function ---
 
 function AllQuotes() {
   const [quotes, setQuotes] = useState([]);
@@ -98,22 +93,18 @@ function AllQuotes() {
                   <div className="truncate">
                     <div className="flex text-lg font-medium text-blue-600">
                       <User className="w-5 h-5 text-gray-400 mr-2" />
-                      {/* ---
-                        FIX: Changed from quote.clientName to quote.clientContactName
-                        --- */}
                       {quote.clientContactName || 'No Name'}
                     </div>
                     <div className="flex items-center text-sm text-gray-500 mt-2">
                       <FileSearch className="w-4 h-4 text-gray-400 mr-2" />
                       <p className="truncate">
-                        {/* This part was looking for a non-existent field, 
-                            so I changed it to show the projectTitle or fallback to the ID */}
                         {quote.projectTitle || (quote.id)}
                       </p>
                     </div>
                   </div>
                   <div className="ml-5 flex-shrink-0">
-                    {formatStatus(quote.status)}
+                    {/* --- TASK: Use new StatusBadge component --- */}
+                    <StatusBadge status={quote.status} />
                   </div>
                 </div>
               </li>

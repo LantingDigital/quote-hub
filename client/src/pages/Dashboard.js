@@ -1,5 +1,10 @@
 /*
 automated-hiring-funnel/client/src/pages/Dashboard.js
+---
+MODIFIED:
+- TASK (Plan Step 4, final): Replaced the local 'QuoteStatus' component
+  with the new reusable 'StatusBadge' component to ensure
+  visual consistency on the dashboard.
 */
 
 import React, { useState, useEffect } from 'react';
@@ -24,29 +29,13 @@ import {
   Eye,
   LinkIcon, 
   CheckCircle,
-  FileDown, // --- Import FileDown Icon ---
+  FileDown, 
 } from 'lucide-react';
 import NewQuoteModal from '../components/NewQuoteModal';
 import AlertModal from '../components/AlertModal';
+import StatusBadge from '../components/StatusBadge'; // <-- TASK: Import new component
 
-// (QuoteStatus and RecentQuoteItem components remain unchanged)
-// ...
-const QuoteStatus = ({ status }) => {
-  const statusMap = {
-    Draft: 'bg-gray-100 text-gray-800',
-    Sent: 'bg-blue-100 text-blue-800',
-    Signed: 'bg-green-100 text-green-800',
-    Default: 'bg-yellow-100 text-yellow-800',
-  };
-  const style = statusMap[status] || statusMap.Default;
-  return (
-    <span
-      className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${style}`}
-    >
-      {status || 'N/A'}
-    </span>
-  );
-};
+// --- TASK: Deleted the old, local 'QuoteStatus' component ---
 
 const RecentQuoteItem = ({ quote }) => (
   <motion.li
@@ -64,10 +53,6 @@ const RecentQuoteItem = ({ quote }) => (
       </div>
       <div>
         <p className="text-sm font-medium text-gray-900 truncate">
-          {/* ---
-            FIX: Changed from quote.clientName to quote.clientContactName
-            This matches the field being saved by NewQuoteModal.js
-            --- */}
           {quote.clientContactName || 'Unnamed Quote'}
         </p>
         <p className="text-sm text-gray-500">
@@ -78,7 +63,8 @@ const RecentQuoteItem = ({ quote }) => (
       </div>
     </div>
     <div className="flex items-center space-x-4">
-      <QuoteStatus status={quote.status || 'Draft'} />
+      {/* --- TASK: Use new StatusBadge component --- */}
+      <StatusBadge status={quote.status} />
       <Link
         to={`/quote-profile/${quote.id}`}
         className="text-gray-400 hover:text-blue-600"
@@ -98,7 +84,6 @@ export default function Dashboard() {
 
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
   
-  // --- This state will now handle BOTH links and PDFs ---
   const [shareAlert, setShareAlert] = useState({
     show: false,
     title: '',
@@ -106,10 +91,8 @@ export default function Dashboard() {
     link: '',
     isPdf: false,
   });
-  // ---------------------------------
 
   useEffect(() => {
-    // ... (fetchDashboardData remains unchanged)
     const fetchDashboardData = async () => {
       if (!currentUser) return;
       setLoading(true);
@@ -145,7 +128,6 @@ export default function Dashboard() {
     fetchDashboardData();
   }, [currentUser]);
 
-  // --- Updated Handler ---
   const handleLinkGenerated = (link) => {
     setShareAlert({
       show: true,
@@ -156,7 +138,6 @@ export default function Dashboard() {
     });
   };
 
-  // --- NEW Handler ---
   const handlePdfGenerated = (pdfUrl) => {
     setShareAlert({
       show: true,
@@ -168,7 +149,6 @@ export default function Dashboard() {
   };
 
   const statCards = [
-    // ... (statCards array is unchanged)
     {
       name: 'Total Quotes',
       stat: stats.total,
@@ -195,7 +175,6 @@ export default function Dashboard() {
   return (
     <> 
       <motion.div
-        // ... (motion.div and all dashboard UI is unchanged) ...
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -319,7 +298,7 @@ export default function Dashboard() {
         isOpen={isQuoteModalOpen}
         onClose={() => setIsQuoteModalOpen(false)}
         onLinkGenerated={handleLinkGenerated}
-        onPdfGenerated={handlePdfGenerated} // --- Pass new handler ---
+        onPdfGenerated={handlePdfGenerated}
       />
 
       <AlertModal
@@ -329,10 +308,8 @@ export default function Dashboard() {
         message={shareAlert.message}
         icon={<CheckCircle className="w-12 h-12 text-green-500" />}
       >
-        {/* --- Conditionally render button or input --- */}
         <div className="mt-4">
           {shareAlert.isPdf ? (
-            // --- Show Download Button ---
             <a
               href={shareAlert.link}
               target="_blank"
@@ -343,7 +320,6 @@ export default function Dashboard() {
               Download PDF
             </a>
           ) : (
-            // --- Show Copy Link Input ---
             <>
               <input
                 type="text"

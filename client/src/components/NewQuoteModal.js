@@ -1,3 +1,11 @@
+/*
+automated-hiring-funnel/client/src/components/NewQuoteModal.js
+---
+MODIFIED:
+- (FIX) Changed initial status on quote creation from 'Pending' to 'Drafted'
+  (This was the root cause of the workflow bug).
+*/
+
 import React, { useState, useEffect } from 'react';
 import {
   Dialog,
@@ -169,7 +177,7 @@ export default function NewQuoteModal({ isOpen, onClose, onLinkGenerated }) {
         projectScope: formData.projectScope,
         // System Info
         serviceModel: selectedModel,
-        status: 'Pending',
+        status: 'Drafted', // <--- THIS IS THE FIX (was 'Pending')
         userId: currentUser.uid,
         createdAt: serverTimestamp(),
       };

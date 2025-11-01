@@ -1,5 +1,10 @@
 /*
 automated-hiring-funnel/client/src/pages/ApplicantProfile.js
+---
+MODIFIED:
+- (FIX) Updated getStatusStyles() to match StatusBadge.js logic,
+  correctly mapping 'New' and 'Pending' to the 'Drafted' style.
+- This ensures the "Mark as Sent" button appears correctly.
 */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -8,7 +13,22 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db, functions } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, AlertCircle, Save, FileText, CheckCircle, CalendarRange, Link, Download } from 'lucide-react'; // Added Link and Download icons
+import {
+  Loader2,
+  AlertCircle,
+  Save,
+  FileText,
+  CheckCircle,
+  CalendarRange,
+  Link,
+  Download,
+  Info,
+  Clock,
+  Send,
+  AlertTriangle,
+  FileWarning, 
+  ShieldCheck, // --- Added ShieldCheck icon ---
+} from 'lucide-react';
 import {
   calculateSubscription,
   calculateProject,
@@ -118,13 +138,12 @@ function QuoteProfile() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSending, setIsSending] = useState(false); // State for 'Mark as Sent'
   const [error, setError] = useState(null);
   const [alert, setAlert] = useState({ show: false, message: '', isError: false });
   
-  // ---
   // Re-usable function to load/reload data
-  // ---
-  const loadData = async () => {
+  const loadData = async (showAlert = false, message = '') => {
     try {
       if (!quoteId) {
         setError('No quote ID provided.');
@@ -164,6 +183,10 @@ function QuoteProfile() {
         return;
       }
       setConfigData(configSnap.data());
+
+      if (showAlert) {
+        setAlert({ show: true, message: message, isError: false });
+      }
 
     } catch (err) {
       console.error("Error loading data:", err);
@@ -241,11 +264,12 @@ function QuoteProfile() {
   };
 
   // --- Save logic ---
-  // A more robust check for changes
   const isDirty = useMemo(() => {
     if (!quoteData || !editableQuoteData) return false;
     // Compare the original data (quoteData) with the string-based form data (editableQuoteData)
     for (const key in editableQuoteData) {
+      // Skip 'status' from isDirty check if we're only changing status via buttons
+      if (key === 'status') continue;
       const originalValue = Array.isArray(quoteData[key]) ? JSON.stringify(quoteData[key]) : String(quoteData[key] ?? '');
       const editableValue = Array.isArray(editableQuoteData[key]) ? JSON.stringify(editableQuoteData[key]) : String(editableQuoteData[key] ?? '');
       if (originalValue !== editableValue) {
@@ -280,20 +304,8 @@ function QuoteProfile() {
       const quoteRef = doc(db, 'quotes', quoteId);
       await updateDoc(quoteRef, dataToSave);
       
-      // We must re-set the *original* data to what we just saved
-      setQuoteData(dataToSave); 
-      // Re-run the stringification logic
-      const stringifiedQuote = Object.keys(dataToSave).reduce((acc, key) => {
-        if (Array.isArray(dataToSave[key])) {
-          acc[key] = dataToSave[key];
-        } else {
-          acc[key] = String(dataToSave[key] ?? '');
-        }
-        return acc;
-      }, { ...dataToSave });
-      setEditableQuoteData(stringifiedQuote);
-
-      setAlert({ show: true, message: 'Quote updated successfully!', isError: false });
+      // Reload data and show success
+      await loadData(true, 'Quote updated successfully!');
 
     } catch (err) {
       console.error("Error saving data:", err);
@@ -301,6 +313,29 @@ function QuoteProfile() {
     }
     setIsSaving(false);
   };
+  
+  // --- 'Mark as Sent' Handler ---
+  const handleMarkAsSent = async () => {
+    if (isDirty) {
+       setAlert({ show: true, message: 'Please save your changes before marking as sent.', isError: true });
+       return;
+    }
+    setIsSending(true);
+    try {
+      const quoteRef = doc(db, 'quotes', quoteId);
+      await updateDoc(quoteRef, {
+        status: 'Sent',
+        sentAt: new Date(), // Add a timestamp for tracking
+      });
+      // Reload data and show success
+      await loadData(true, 'Quote marked as "Sent"!');
+    } catch (err) {
+      console.error("Error marking as sent:", err);
+      setAlert({ show: true, message: `Failed to update status: ${err.message}`, isError: true });
+    }
+    setIsSending(false);
+  };
+
 
   // --- Contract Generation ---
   const handleGenerateContracts = async () => {
@@ -316,9 +351,12 @@ function QuoteProfile() {
       // @ts-ignore
       const { contractUrl, message } = result.data;
       if (contractUrl) {
-         setAlert({ show: true, message: `Contracts generated!`, isError: false });
-         // Refresh the data to show new contract status/links
-         await loadData();
+         // --- TASK: Update status on success ---
+         const quoteRef = doc(db, 'quotes', quoteId);
+         await updateDoc(quoteRef, {
+           status: 'Contract Generated',
+         });
+         await loadData(true, `Contracts generated!`);
       } else {
         throw new Error(message || 'Failed to generate contract.');
       }
@@ -326,7 +364,19 @@ function QuoteProfile() {
       console.error("Error generating contracts:", err);
       // @ts-ignore
       const errorMessage = err.message || 'An unknown error occurred.';
+      
+      // --- TASK: Update status on failure ---
+      try {
+        const quoteRef = doc(db, 'quotes', quoteId);
+        await updateDoc(quoteRef, {
+          status: 'Generation Failed',
+        });
+      } catch (statusErr) {
+         console.error("Failed to set error status:", statusErr);
+      }
+      
       setAlert({ show: true, message: `Generation failed: ${errorMessage}`, isError: true });
+      await loadData(); // Reload to show new 'Failed' status
     }
     setIsGenerating(false);
   };
@@ -365,10 +415,76 @@ function QuoteProfile() {
 
   const isTinkerToy = editableQuoteData.serviceModel === 'subscription' || editableQuoteData.serviceModel === 'project';
   
-  // ---
-  // NEW: Check if there are any contracts to display
-  // ---
   const hasContracts = editableQuoteData.contractDocs && editableQuoteData.contractDocs.length > 0;
+
+  // --- TASK: (FIX) New Status Badge Logic ---
+  const getStatusStyles = (status) => {
+    switch (status) {
+      case 'Drafted':
+        return {
+          bgColor: 'bg-gray-100',
+          textColor: 'text-gray-800',
+          borderColor: 'border-gray-200',
+          icon: <FileWarning className="w-4 h-4 mr-1.5" />,
+          text: 'Drafted',
+          helperText:
+            "This quote is a draft. Click 'Mark as Sent' when you're ready for the client to see it.",
+        };
+      case 'Sent':
+        return {
+          bgColor: 'bg-yellow-100',
+          textColor: 'text-yellow-800',
+          borderColor: 'border-yellow-200',
+          icon: <Clock className="w-4 h-4 mr-1.5" />,
+          text: 'Sent to Client',
+          helperText:
+            'Quote has been sent to the client. Awaiting their review and approval.',
+        };
+      case 'Approved':
+        return {
+          bgColor: 'bg-blue-100',
+          textColor: 'text-blue-800',
+          borderColor: 'border-blue-200',
+          icon: <CheckCircle className="w-4 h-4 mr-1.5" />,
+          text: 'Approved by Client',
+          helperText:
+            "Client has approved the quote! You can now review and 'Generate Contract(s)'.",
+        };
+      case 'Contract Generated':
+        return {
+          bgColor: 'bg-green-100',
+          textColor: 'text-green-800',
+          borderColor: 'border-green-200',
+          icon: <ShieldCheck className="w-4 h-4 mr-1.5" />,
+          text: 'Contract(s) Generated',
+          helperText:
+            'Contracts are generated and available for download. Ready for e-signature.',
+        };
+      case 'Generation Failed':
+         return {
+          bgColor: 'bg-red-100',
+          textColor: 'text-red-800',
+          borderColor: 'border-red-200',
+          icon: <AlertTriangle className="w-4 h-4 mr-1.5" />,
+          text: 'Generation Failed',
+          helperText:
+            'Contract generation failed. Check logs, fix any issues, and try again.',
+        };
+      case 'New': // --- THIS IS THE FIX ---
+      case 'Pending': // --- THIS IS THE FIX ---
+      default: // Handle 'New', 'Pending', or other old/unknown statuses
+        return {
+          bgColor: 'bg-gray-100',
+          textColor: 'text-gray-800',
+          borderColor: 'border-gray-200',
+          icon: <FileWarning className="w-4 h-4 mr-1.5" />,
+          text: 'Drafted', // --- THIS IS THE FIX ---
+          helperText: 'This quote is a draft. Click "Mark as Sent" to activate the client link.',
+        };
+    }
+  };
+  const statusInfo = getStatusStyles(editableQuoteData.status);
+  // --- End Status Badge Logic ---
 
   return (
     <>
@@ -394,7 +510,7 @@ function QuoteProfile() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 10 }}
                   onClick={handleSave}
-                  disabled={isSaving}
+                  disabled={isSaving || isSending || isGenerating}
                   className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none disabled:opacity-50"
                 >
                   <Save className="w-5 h-5 mr-2" />
@@ -402,9 +518,24 @@ function QuoteProfile() {
                 </motion.button>
               )}
             </AnimatePresence>
+            
+            {/* --- 'Mark as Sent' Button --- */}
+            {/* This logic is now correct. It will show if status is 'Drafted', 'New', or 'Pending' */}
+            {(editableQuoteData.status === 'Drafted' || editableQuoteData.status === 'New' || editableQuoteData.status === 'Pending') && (
+              <button
+                onClick={handleMarkAsSent}
+                disabled={isGenerating || isSaving || isSending || isDirty}
+                className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none disabled:opacity-50"
+              >
+                <Send className="w-5 h-5 mr-2" />
+                {isSending ? 'Sending...' : 'Mark as Sent'}
+              </button>
+            )}
+            
+            {/* --- Generate Contract(s) Button --- */}
             <button
               onClick={handleGenerateContracts}
-              disabled={isGenerating || isDirty}
+              disabled={isGenerating || isSaving || isSending || isDirty || (editableQuoteData.status !== 'Approved' && editableQuoteData.status !== 'Generation Failed')}
               className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none disabled:opacity-50"
             >
               <FileText className="w-5 h-5 mr-2" />
@@ -624,9 +755,24 @@ function QuoteProfile() {
 
             {/* --- Status & Links --- */}
             <SectionWrapper title="Quote Status & Links">
-                <p>Status: <span className='font-medium text-gray-800'>{editableQuoteData.status}</span></p>
+                
+                {/* --- NEW STATUS DISPLAY --- */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Status</label>
+                  <div 
+                    className={`mt-1 flex items-center px-3 py-2 text-sm font-medium rounded-md border ${statusInfo.bgColor} ${statusInfo.textColor} ${statusInfo.borderColor}`}
+                  >
+                    {statusInfo.icon}
+                    {statusInfo.text}
+                  </div>
+                  <p className="mt-2 text-sm text-gray-500">
+                    {statusInfo.helperText}
+                  </p>
+                </div>
+                {/* --- END NEW STATUS DISPLAY --- */}
+
                 {isTinkerToy && (
-                  <div>
+                  <div className="pt-4 border-t border-gray-200"> {/* Added separation */}
                     <label className="block text-sm font-medium text-gray-700">Client Calculator Link</label>
                     <div className="relative">
                       <input
@@ -647,9 +793,7 @@ function QuoteProfile() {
                   </div>
                 )}
 
-                {/* ---
-                  NEW SECTION: Display Generated Documents
-                  --- */}
+                {/* --- Display Generated Documents --- */}
                 {hasContracts && (
                   <div className="pt-4 border-t border-gray-200">
                     <h4 className="text-md font-medium text-gray-800">Generated Documents</h4>
