@@ -1,5 +1,11 @@
 /*
 automated-hiring-funnel/client/src/pages/ApplicantForm.js
+---
+MODIFIED:
+- Renamed to QuoteCalculator.js (as per context.txt)
+- TASK 1.8.1: Changed "Accept & Generate Contract" to "Submit Quote"
+- Refactored state/handlers from 'isAccepting' to 'isSubmitting'
+- Changed status update from 'Accepted' to 'Submitted'
 */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -8,7 +14,7 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db, functions } from '../firebase'; // Assuming 'functions' export for HttpsCallable
 import { httpsCallable } from 'firebase/functions';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, CheckCircle, AlertCircle, ShieldCheck } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, ShieldCheck, Send } from 'lucide-react'; // Import Send icon
 import {
   calculateSubscription,
   calculateProject,
@@ -130,8 +136,14 @@ function QuoteCalculator() {
   const [configData, setConfigData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [isAccepting, setIsAccepting] = useState(false);
-  const [contractUrl, setContractUrl] = useState(null);
+  
+  // --- STATE REFACTOR (Task 1) ---
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionSuccess, setSubmissionSuccess] = useState(false);
+  // --- End Refactor ---
+
+  // We no longer set contractUrl here, the admin will generate it.
+  // const [contractUrl, setContractUrl] = useState(null); 
 
   const [clientChoices, setClientChoices] = useState({
     serviceModel: 'subscription', // 'subscription' or 'project'
@@ -159,6 +171,16 @@ function QuoteCalculator() {
           return;
         }
         const quote = quoteSnap.data();
+        
+        // --- CHECK STATUS ---
+        // If quote is already submitted, show success screen
+        if (quote.status === 'Submitted' || quote.status === 'Accepted' || quote.status === 'Contract Generated') {
+          setSubmissionSuccess(true);
+          setIsLoading(false);
+          return;
+        }
+        // --- End Check ---
+        
         setQuoteData(quote);
 
         // 2. Fetch the main config
@@ -173,16 +195,14 @@ function QuoteCalculator() {
         setConfigData(config);
 
         // 3. Set default client choices based on loaded config
-        // --- THIS IS THE FIX ---
         const defaultTerm = config.models.subscription.amortization_terms?.[0] || 12;
         
         setClientChoices((prev) => ({
           ...prev,
-          // Set model based on quote data, fallback to subscription
           serviceModel: quote.serviceModel || 'subscription',
           tier: Object.keys(config.models.subscription.tiers)[0] || '',
           paymentPlan: Object.keys(config.models.subscription.payment_options)[0] || '',
-          amortizationTerm: defaultTerm, // Set default from new config
+          amortizationTerm: defaultTerm,
         }));
 
       } catch (err) {
@@ -202,7 +222,6 @@ function QuoteCalculator() {
       return calculateProject(quoteData, configData);
     }
     
-    // Default to subscription
     return calculateSubscription(quoteData, clientChoices, configData);
 
   }, [quoteData, configData, clientChoices]);
@@ -218,18 +237,18 @@ function QuoteCalculator() {
       };
     }
     
-    // Must pass the date-fns object to the logic file
     return generatePaymentSchedule(quoteData, calculatedFees, dateFns);
 
   }, [quoteData, calculatedFees, clientChoices.serviceModel]);
 
-  const handleAcceptQuote = async () => {
-    setIsAccepting(true);
+  // --- HANDLER REFACTOR (Task 1) ---
+  const handleSubmitQuote = async () => {
+    setIsSubmitting(true);
     setError(null);
     try {
-      // 1. Update the quote doc with the final selections
+      // 1. Update the quote doc with the final selections and new status
       await updateDoc(doc(db, 'quotes', quoteId), {
-        status: 'Accepted',
+        status: 'Submitted', // <-- TASK 1 CHANGE
         selectedServiceModel: clientChoices.serviceModel,
         selectedTier: clientChoices.tier,
         selectedPaymentPlan: clientChoices.paymentPlan,
@@ -237,28 +256,21 @@ function QuoteCalculator() {
         finalSetupFee: calculatedFees.setupFee,
         finalMonthlyFee: calculatedFees.totalActiveMonthly,
         finalTotalCost: totalCost,
+        lastSubmittedAt: new Date(), // Add a timestamp for tracking
       });
-
-      // 2. Call the 'generateContractV2' cloud function
-      const generateContractV2 = httpsCallable(functions, 'generateContractV2');
-      const result = await generateContractV2({ quoteId: quoteId });
       
-      // @ts-ignore
-      const { contractUrl, message } = result.data;
+      // 2. No longer call cloud function. Just show success.
+      // The admin will now be responsible for generating the contract.
+      setSubmissionSuccess(true);
       
-      if (contractUrl) {
-        setContractUrl(contractUrl);
-      } else {
-        throw new Error(message || 'Failed to generate contract.');
-      }
-
     } catch (err) {
-      console.error("Error accepting quote:", err);
+      console.error("Error submitting quote:", err);
       setError(err.message);
-      setIsAccepting(false);
+      setIsSubmitting(false); // Only set to false on error
     }
-    // Don't set isAccepting to false, we want to show the final state
+    // On success, we transition to the success screen
   };
+  // --- End Refactor ---
   
 
   // --- Render Logic ---
@@ -276,39 +288,41 @@ function QuoteCalculator() {
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
         <div className="text-center">
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto" />
-          <h2 className="mt-4 text-xl font-semibold text-gray-800">Error loading quote</h2>
+          <h2 className="mt-4 text-xl font-semibold text-gray-800">Error</h2>
           <p className="text-gray-600">{error}</p>
         </div>
       </div>
     );
   }
 
-  if (contractUrl) {
+  // --- SUCCESS SCREEN (Task 1) ---
+  // This screen now handles both submission and contract generated states
+  if (submissionSuccess) {
      return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="p-8 bg-white shadow-xl rounded-lg text-center"
+          className="p-8 bg-white shadow-xl rounded-lg text-center max-w-lg"
         >
           <CheckCircle className="w-16 h-16 text-green-500 mx-auto" />
-          <h2 className="mt-6 text-2xl font-bold text-gray-900">Success!</h2>
-          <p className="mt-2 text-gray-600">Your contracts have been generated.</p>
-          <a
-            href={contractUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-8 inline-flex items-center justify-center px-6 py-3 text-base font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-          >
-            View Your Contract
-          </a>
+          <h2 className="mt-6 text-2xl font-bold text-gray-900">Thank You!</h2>
+          <p className="mt-2 text-gray-600">
+            Your quote selections have been submitted. We are reviewing your
+            details and will be in touch shortly with your finalized
+            contract documents.
+          </p>
+          {/* This component no longer holds the contract URL.
+            We can add this back later in Phase 2 when the client
+            has a portal to log into and view their generated contracts.
+          */}
         </motion.div>
       </div>
     );
   }
+  // --- End Success Screen ---
 
   if (!quoteData || !configData || !calculatedFees) {
-    // This state can happen for a split second before defaults are set
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
         <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
@@ -322,8 +336,6 @@ function QuoteCalculator() {
   
   const tierOrder = ["foundation", "growth", "accelerator"];
   const paymentPlanOrder = ["flex_start", "split_pay", "full_buyout"];
-  // --- THIS IS THE FIX ---
-  // Read terms from config, provide a fallback just in case
   const amortizationTerms = subscription.amortization_terms || [12, 18, 24];
 
   return (
@@ -335,9 +347,6 @@ function QuoteCalculator() {
       {/* --- Header --- */}
       <div className="mb-8">
         <h1 className="text-4xl font-bold text-gray-900">
-          {/* ---
-            FIX: Changed from quoteData.clientName to quoteData.clientContactName
-            --- */}
           Hi, {quoteData.clientContactName || 'Valued Client'}
         </h1>
         <p className="mt-2 text-lg text-gray-600">
@@ -384,7 +393,7 @@ function QuoteCalculator() {
                   <div className="mt-4 space-y-3">
                     {tierOrder.map((key) => {
                       const tier = subscription.tiers[key];
-                      if (!tier) return null; // Safety check
+                      if (!tier) return null;
                       return (
                         <OptionCard
                           key={key}
@@ -404,7 +413,7 @@ function QuoteCalculator() {
                   <div className="mt-4 space-y-3">
                     {paymentPlanOrder.map((key) => {
                       const plan = subscription.payment_options[key];
-                      if (!plan) return null; // Safety check
+                      if (!plan) return null;
                       return (
                         <OptionCard
                           key={key}
@@ -442,7 +451,6 @@ function QuoteCalculator() {
                           })
                         }
                       >
-                        {/* --- THIS IS THE FIX --- */}
                         {amortizationTerms.map(term => (
                           <option key={term} value={term}>{term} Months</option>
                         ))}
@@ -490,7 +498,6 @@ function QuoteCalculator() {
               <div className="mt-6">
                 <h4 className="text-md font-semibold text-gray-800">Features included in {calculatedFees.tierName}:</h4>
                 <ul className="mt-2 space-y-1 list-disc list-inside text-gray-600">
-                  {/* Safety check for features array */}
                   {(calculatedFees.features || []).map((feature, i) => (
                     <li key={i}>{feature.replace(/\*\*(.*?)\*\*/g, '$1')}</li>
                   ))}
@@ -510,33 +517,34 @@ function QuoteCalculator() {
             <ScheduleTable schedule={schedule} />
           </div>
 
-          {/* --- Accept & Sign Card --- */}
-          <div className="p-6 bg-green-50 rounded-lg shadow-lg border border-green-200">
+          {/* --- SUBMIT CARD (Task 1) --- */}
+          <div className="p-6 bg-blue-50 rounded-lg shadow-lg border border-blue-200">
             <div className="flex items-start">
               <div className="flex-shrink-0">
-                <ShieldCheck className="h-8 w-8 text-green-500" />
+                <ShieldCheck className="h-8 w-8 text-blue-500" />
               </div>
               <div className="ml-4 flex-1">
                 <h2 className="text-2xl font-bold text-gray-900">
-                  Ready to get started?
+                  Ready to proceed?
                 </h2>
+                {/* --- TEXT CHANGE (Task 1) --- */}
                 <p className="mt-2 text-gray-700">
-                  By clicking "Accept & Generate Contract", you are agreeing to
-                  the terms outlined in this quote. We will then generate your
-                  Master Service Agreement, Scope of Work, and all other
-                                    necessary documents for your e-signature.
+                  By clicking "Submit Quote", you are agreeing to
+                  the terms outlined in this quote. We will then review your
+                  selections and prepare your final contract documents.
                 </p>
+                {/* --- BUTTON CHANGE (Task 1) --- */}
                 <button
-                  onClick={handleAcceptQuote}
-                  disabled={isAccepting}
-                  className="mt-6 inline-flex items-center justify-center px-6 py-3 text-base font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
+                  onClick={handleSubmitQuote}
+                  disabled={isSubmitting}
+                  className="mt-6 inline-flex items-center justify-center px-6 py-3 text-base font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                 >
-                  {isAccepting ? (
+                  {isSubmitting ? (
                     <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                   ) : (
-                    <CheckCircle className="w-5 h-5 mr-2" />
+                    <Send className="w-5 h-5 mr-2" /> // Using 'Send' icon
                   )}
-                  {isAccepting ? 'Generating...' : 'Accept & Generate Contract'}
+                  {isSubmitting ? 'Submitting...' : 'Submit Quote'}
                 </button>
               </div>
             </div>
