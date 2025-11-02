@@ -2,8 +2,7 @@
 automated-hiring-funnel/client/src/components/NewQuoteModal.js
 ---
 MODIFIED:
-- (FIX) Changed initial status on quote creation from 'Pending' to 'Drafted'
-  (This was the root cause of the workflow bug).
+- Updated defaultFormState for 'paymentScheduleYears' from 2 to 10.
 */
 
 import React, { useState, useEffect } from 'react';
@@ -95,12 +94,13 @@ const defaultFormState = {
   buffer: '20',
   discountPct: '0',
   discountUsd: '0',
+  discountDurationMonths: '36',
   billingSchedule: 'standard',
   amortStartMonth: '', 
   yr1SeasonalRange: '',
   yr2SeasonalRange: '',
   yr2StartDate: '',
-  paymentScheduleYears: 2,
+  paymentScheduleYears: 10, // <-- MODIFIED: Set default to 10 years
   // Maintenance Fields
   maintenanceFee: '',
   maintenanceHours: '',
@@ -177,7 +177,7 @@ export default function NewQuoteModal({ isOpen, onClose, onLinkGenerated }) {
         projectScope: formData.projectScope,
         // System Info
         serviceModel: selectedModel,
-        status: 'Drafted', // <--- THIS IS THE FIX (was 'Pending')
+        status: 'Drafted', 
         userId: currentUser.uid,
         createdAt: serverTimestamp(),
       };
@@ -193,7 +193,8 @@ export default function NewQuoteModal({ isOpen, onClose, onLinkGenerated }) {
           buffer: parseFloat(formData.buffer) || 0,
           discountPct: parseFloat(formData.discountPct) || 0,
           discountUsd: parseFloat(formData.discountUsd) || 0,
-          paymentScheduleYears: parseInt(formData.paymentScheduleYears, 10) || 2,
+          paymentScheduleYears: parseInt(formData.paymentScheduleYears, 10) || 10, // <-- MODIFIED: Save 10
+          discountDurationMonths: parseInt(formData.discountDurationMonths, 10) || 36,
           ...(selectedModel === 'subscription' && {
             billingSchedule: formData.billingSchedule,
             amortStartMonth: formData.amortStartMonth,
@@ -470,6 +471,14 @@ export default function NewQuoteModal({ isOpen, onClose, onLinkGenerated }) {
                                 placeholder="YYYY-MM (e.g., 2025-11)"
                               />
                             </div>
+                            {/* --- MODIFIED: Added paymentScheduleYears input --- */}
+                             <FormInput
+                                label="Schedule View (Years)"
+                                id="paymentScheduleYears"
+                                type="number"
+                                value={formData.paymentScheduleYears}
+                                onChange={handleChange}
+                              />
                             {formData.billingSchedule === 'seasonal' && (
                               <div className="space-y-4">
                                 <FormInput

@@ -2,9 +2,21 @@
 automated-hiring-funnel/client/src/pages/ApplicantProfile.js
 ---
 MODIFIED:
-- (FIX) Updated getStatusStyles() to match StatusBadge.js logic,
-  correctly mapping 'New' and 'Pending' to the 'Drafted' style.
-- This ensures the "Mark as Sent" button appears correctly.
+- (FIX) Updated getStatusStyles() to match StatusBadge.js logic.
+- FEAT (USER REQ 3): Added AdminInput for `paymentScheduleYears`.
+- FEAT (USER REQ 3): Removed `.slice(0, 13)` from schedule preview to show all.
+- FEAT (USER REQ 4.A): Added `isLocked` const to disable all inputs if
+  status is 'Sent'. Added `disabled` prop and styles to all inputs.
+- FEAT (USER REQ 4.B & CONTEXT [416]): Updated `handleSave` to change
+  status from 'Approved' to 'Pending Re-send' on save.
+- FEAT (USER REQ 4.D & CONTEXT [418]): Added "Retract to Draft" button,
+  visible only on 'Sent' status. Uses `window.confirm()`.
+- FEAT (USER REQ 4.C & CONTEXT [417]): Updated "Mark as Sent" button
+  to also be visible for 'Pending Re-send' status.
+- FEAT (CONTEXT [415, 424]): Added 'Pending Re-send' (Purple 💜) and 'Declined'
+  (Red ❤️) to `getStatusStyles`.
+- FEAT (CONTEXT [426]): Added logic to display `declineReason` if
+  status is 'Declined'.
 */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -26,8 +38,11 @@ import {
   Clock,
   Send,
   AlertTriangle,
-  FileWarning, 
-  ShieldCheck, // --- Added ShieldCheck icon ---
+  FileWarning,
+  ShieldCheck,
+  RotateCcw, // For Retract
+  ArchiveX, // For Decline
+  RefreshCw, // For Pending Re-send
 } from 'lucide-react';
 import {
   calculateSubscription,
@@ -68,7 +83,8 @@ const dateFns = {
 
 // --- Helper Components ---
 
-const AdminInput = ({ label, id, value, onChange, type = 'text', placeholder, step }) => (
+// --- MODIFIED (USER REQ 4.A): Added `disabled` prop ---
+const AdminInput = ({ label, id, value, onChange, type = 'text', placeholder, step, disabled = false }) => (
   <div>
     <label htmlFor={id} className="block text-sm font-medium text-gray-700">
       {label}
@@ -82,13 +98,15 @@ const AdminInput = ({ label, id, value, onChange, type = 'text', placeholder, st
         onChange={onChange}
         placeholder={placeholder}
         step={step}
-        className="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+        disabled={disabled} // --- ADDED ---
+        className="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" // --- ADDED DISABLED STYLES ---
       />
     </div>
   </div>
 );
 
-const AdminSelect = ({ label, id, value, onChange, children }) => (
+// --- MODIFIED (USER REQ 4.A): Added `disabled` prop ---
+const AdminSelect = ({ label, id, value, onChange, children, disabled = false }) => (
   <div>
     <label htmlFor={id} className="block text-sm font-medium text-gray-700">
       {label}
@@ -98,12 +116,50 @@ const AdminSelect = ({ label, id, value, onChange, children }) => (
       name={id} // The name attribute is crucial for the handleChange function
       value={value}
       onChange={onChange}
-      className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+      disabled={disabled} // --- ADDED ---
+      className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" // --- ADDED DISABLED STYLES ---
     >
       {children}
     </select>
   </div>
 );
+// --- MODIFIED (USER REQ 3): New component for schedule table ---
+const AdminScheduleTable = ({ schedule }) => (
+  <div className="max-h-96 overflow-y-auto border rounded-md">
+    <table className="min-w-full divide-y divide-gray-200">
+      <thead className="bg-gray-50 sticky top-0">
+        <tr>
+          <th scope="col" className="py-2 px-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            Date
+          </th>
+          <th scope="col" className="py-2 px-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            Description
+          </th>
+          <th scope="col" className="py-2 px-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            Amount
+          </th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-200 bg-white">
+        {schedule.map((item, index) => (
+          <tr key={index} className={item.notes.startsWith('Total') ? 'bg-gray-50 font-medium' : ''}>
+            <td className="whitespace-nowrap px-3 py-2 text-sm font-medium text-gray-900">
+              {item.date}
+            </td>
+            <td className="whitespace-nowrap px-3 py-2 text-sm text-gray-500">{item.notes}</td>
+            <td className="whitespace-nowrap px-3 py-2 text-sm text-gray-500">
+              {item.amount.toLocaleString('en-US', {
+                style: 'currency',
+                currency: 'USD',
+              })}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
 
 const PriceDisplay = ({ label, value }) => (
   <div className="py-4 px-6 bg-gray-50 rounded-lg text-center">
@@ -139,6 +195,7 @@ function QuoteProfile() {
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false); // State for 'Mark as Sent'
+  const [isRetracting, setIsRetracting] = useState(false); // --- NEW (USER REQ 4.D) ---
   const [error, setError] = useState(null);
   const [alert, setAlert] = useState({ show: false, message: '', isError: false });
   
@@ -246,7 +303,7 @@ function QuoteProfile() {
       buffer: parseFloat(editableQuoteData.buffer) || 0,
       discountPct: parseFloat(editableQuoteData.discountPct) || 0,
       discountUsd: parseFloat(editableQuoteData.discountUsd) || 0,
-      paymentScheduleYears: parseInt(editableQuoteData.paymentScheduleYears, 10) || 2,
+      paymentScheduleYears: parseInt(editableQuoteData.paymentScheduleYears, 10) || 2, // --- MODIFIED (USER REQ 3) ---
     };
 
     return generatePaymentSchedule(numericQuoteData, calculatedFees, dateFns);
@@ -270,10 +327,24 @@ function QuoteProfile() {
     for (const key in editableQuoteData) {
       // Skip 'status' from isDirty check if we're only changing status via buttons
       if (key === 'status') continue;
-      const originalValue = Array.isArray(quoteData[key]) ? JSON.stringify(quoteData[key]) : String(quoteData[key] ?? '');
-      const editableValue = Array.isArray(editableQuoteData[key]) ? JSON.stringify(editableQuoteData[key]) : String(editableQuoteData[key] ?? '');
-      if (originalValue !== editableValue) {
-        return true;
+      
+      // Handle 'undefined' from Firestore vs 'null' or '' from form
+      const originalValueString = String(quoteData[key] ?? '');
+      const editableValueString = String(editableQuoteData[key] ?? '');
+      
+      if (originalValueString !== editableValueString) {
+        // Handle number comparison (e.g., 10 vs "10")
+        if (typeof quoteData[key] === 'number') {
+           if (parseFloat(originalValueString) !== parseFloat(editableValueString)) {
+             return true;
+           }
+        } else if (Array.isArray(quoteData[key])) {
+           if (JSON.stringify(quoteData[key]) !== JSON.stringify(editableQuoteData[key])) {
+             return true;
+           }
+        } else {
+           return true;
+        }
       }
     }
     return false;
@@ -291,7 +362,7 @@ function QuoteProfile() {
         buffer: parseFloat(editableQuoteData.buffer) || 0,
         discountPct: parseFloat(editableQuoteData.discountPct) || 0,
         discountUsd: parseFloat(editableQuoteData.discountUsd) || 0,
-        paymentScheduleYears: parseInt(editableQuoteData.paymentScheduleYears, 10) || 2,
+        paymentScheduleYears: parseInt(editableQuoteData.paymentScheduleYears, 10) || 10, // --- MODIFIED (USER REQ 3) ---
         // Maintenance
         finalMonthlyFee: parseFloat(editableQuoteData.finalMonthlyFee) || 0,
         includedHours: parseFloat(editableQuoteData.includedHours) || 0,
@@ -300,6 +371,14 @@ function QuoteProfile() {
         // Keep arrays as arrays
         contractDocs: editableQuoteData.contractDocs || [], 
       };
+      
+      // --- NEW (USER REQ 4.B & CONTEXT [416]): Check status ---
+      // If the quote was 'Approved' and we save changes,
+      // move it to 'Pending Re-send'
+      if (quoteData.status === 'Approved') {
+        dataToSave.status = 'Pending Re-send';
+      }
+      // --- End new logic ---
 
       const quoteRef = doc(db, 'quotes', quoteId);
       await updateDoc(quoteRef, dataToSave);
@@ -334,6 +413,28 @@ function QuoteProfile() {
       setAlert({ show: true, message: `Failed to update status: ${err.message}`, isError: true });
     }
     setIsSending(false);
+  };
+  
+  // --- NEW (USER REQ 4.D): 'Retract to Draft' Handler ---
+  const handleRetract = async () => {
+     if (!window.confirm("Are you sure you want to retract this quote? This will pull it back to a draft and deactivate the client link.")) {
+      return;
+    }
+    
+    setIsRetracting(true);
+    try {
+      const quoteRef = doc(db, 'quotes', quoteId);
+      await updateDoc(quoteRef, {
+        status: 'Drafted',
+        retractedAt: new Date(),
+      });
+      // Reload data and show success
+      await loadData(true, 'Quote retracted to "Drafted"!');
+    } catch (err) {
+      console.error("Error retracting quote:", err);
+      setAlert({ show: true, message: `Failed to retract: ${err.message}`, isError: true });
+    }
+    setIsRetracting(false);
   };
 
 
@@ -416,8 +517,12 @@ function QuoteProfile() {
   const isTinkerToy = editableQuoteData.serviceModel === 'subscription' || editableQuoteData.serviceModel === 'project';
   
   const hasContracts = editableQuoteData.contractDocs && editableQuoteData.contractDocs.length > 0;
+  
+  // --- NEW (USER REQ 4.A): Lock inputs if status is 'Sent' ---
+  const isLocked = editableQuoteData.status === 'Sent';
+  const currentStatus = editableQuoteData.status; // For button logic
 
-  // --- TASK: (FIX) New Status Badge Logic ---
+  // --- MODIFIED (USER REQ 4 & CONTEXT): New Status Badge Logic ---
   const getStatusStyles = (status) => {
     switch (status) {
       case 'Drafted':
@@ -438,7 +543,18 @@ function QuoteProfile() {
           icon: <Clock className="w-4 h-4 mr-1.5" />,
           text: 'Sent to Client',
           helperText:
-            'Quote has been sent to the client. Awaiting their review and approval.',
+            "Quote is locked and with the client. Awaiting review. You must 'Retract' it to make changes.",
+        };
+      // --- NEW (CONTEXT [415]): Purple Status ---
+      case 'Pending Re-send':
+        return {
+          bgColor: 'bg-purple-100',
+          textColor: 'text-purple-800',
+          borderColor: 'border-purple-200',
+          icon: <RefreshCw className="w-4 h-4 mr-1.5" />,
+          text: 'Pending Re-send',
+          helperText:
+            "Changes were made after client approval. Review and 'Mark as Sent' to re-send.",
         };
       case 'Approved':
         return {
@@ -448,7 +564,7 @@ function QuoteProfile() {
           icon: <CheckCircle className="w-4 h-4 mr-1.5" />,
           text: 'Approved by Client',
           helperText:
-            "Client has approved the quote! You can now review and 'Generate Contract(s)'.",
+            "Client approved! Review and 'Generate Contract(s)'. (Saving changes now will require a re-send).",
         };
       case 'Contract Generated':
         return {
@@ -470,20 +586,31 @@ function QuoteProfile() {
           helperText:
             'Contract generation failed. Check logs, fix any issues, and try again.',
         };
-      case 'New': // --- THIS IS THE FIX ---
-      case 'Pending': // --- THIS IS THE FIX ---
-      default: // Handle 'New', 'Pending', or other old/unknown statuses
+      // --- NEW (CONTEXT [424]): Declined Status ---
+      case 'Declined':
+         return {
+          bgColor: 'bg-red-100',
+          textColor: 'text-red-800',
+          borderColor: 'border-red-200',
+          icon: <ArchiveX className="w-4 h-4 mr-1.5" />,
+          text: 'Declined by Client',
+          helperText:
+            'The client has declined this quote. See "Decline Reason" for feedback.',
+        };
+      case 'New': // Handle old statuses
+      case 'Pending':
+      default:
         return {
           bgColor: 'bg-gray-100',
           textColor: 'text-gray-800',
           borderColor: 'border-gray-200',
           icon: <FileWarning className="w-4 h-4 mr-1.5" />,
-          text: 'Drafted', // --- THIS IS THE FIX ---
+          text: 'Drafted',
           helperText: 'This quote is a draft. Click "Mark as Sent" to activate the client link.',
         };
     }
   };
-  const statusInfo = getStatusStyles(editableQuoteData.status);
+  const statusInfo = getStatusStyles(currentStatus);
   // --- End Status Badge Logic ---
 
   return (
@@ -510,7 +637,7 @@ function QuoteProfile() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 10 }}
                   onClick={handleSave}
-                  disabled={isSaving || isSending || isGenerating}
+                  disabled={isSaving || isSending || isGenerating || isRetracting} // --- MODIFIED (USER REQ 4) ---
                   className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none disabled:opacity-50"
                 >
                   <Save className="w-5 h-5 mr-2" />
@@ -519,23 +646,34 @@ function QuoteProfile() {
               )}
             </AnimatePresence>
             
-            {/* --- 'Mark as Sent' Button --- */}
-            {/* This logic is now correct. It will show if status is 'Drafted', 'New', or 'Pending' */}
-            {(editableQuoteData.status === 'Drafted' || editableQuoteData.status === 'New' || editableQuoteData.status === 'Pending') && (
+            {/* --- NEW (USER REQ 4.D): 'Retract to Draft' Button --- */}
+            {currentStatus === 'Sent' && (
+              <button
+                onClick={handleRetract}
+                disabled={isGenerating || isSaving || isSending || isRetracting || isDirty}
+                className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md shadow-sm hover:bg-red-700 focus:outline-none disabled:opacity-50"
+              >
+                <RotateCcw className="w-5 h-5 mr-2" />
+                {isRetracting ? 'Retracting...' : 'Retract to Draft'}
+              </button>
+            )}
+            
+            {/* --- MODIFIED (USER REQ 4.C): 'Mark as Sent' Button --- */}
+            {(currentStatus === 'Drafted' || currentStatus === 'New' || currentStatus === 'Pending' || currentStatus === 'Pending Re-send') && (
               <button
                 onClick={handleMarkAsSent}
-                disabled={isGenerating || isSaving || isSending || isDirty}
+                disabled={isGenerating || isSaving || isSending || isRetracting || isDirty}
                 className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none disabled:opacity-50"
               >
                 <Send className="w-5 h-5 mr-2" />
-                {isSending ? 'Sending...' : 'Mark as Sent'}
+                {isSending ? 'Sending...' : (currentStatus === 'Pending Re-send' ? 'Re-send Quote' : 'Mark as Sent')}
               </button>
             )}
             
             {/* --- Generate Contract(s) Button --- */}
             <button
               onClick={handleGenerateContracts}
-              disabled={isGenerating || isSaving || isSending || isDirty || (editableQuoteData.status !== 'Approved' && editableQuoteData.status !== 'Generation Failed')}
+              disabled={isGenerating || isSaving || isSending || isRetracting || isDirty || (currentStatus !== 'Approved' && currentStatus !== 'Generation Failed')}
               className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none disabled:opacity-50"
             >
               <FileText className="w-5 h-5 mr-2" />
@@ -555,6 +693,7 @@ function QuoteProfile() {
                 id="clientContactName" 
                 value={editableQuoteData.clientContactName}
                 onChange={handleChange}
+                disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
               />
               <AdminInput
                 label="Client Email"
@@ -562,6 +701,7 @@ function QuoteProfile() {
                 type="email"
                 value={editableQuoteData.email}
                 onChange={handleChange}
+                disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
               />
             </SectionWrapper>
             
@@ -576,6 +716,7 @@ function QuoteProfile() {
                     type="number"
                     value={editableQuoteData.hours}
                     onChange={handleChange}
+                    disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                   />
                   <AdminInput
                     label="Contingency Buffer (%)"
@@ -583,6 +724,7 @@ function QuoteProfile() {
                     type="number"
                     value={editableQuoteData.buffer}
                     onChange={handleChange}
+                    disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -592,6 +734,7 @@ function QuoteProfile() {
                     type="number"
                     value={editableQuoteData.discountPct}
                     onChange={handleChange}
+                    disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                   />
                   <AdminInput
                     label="Discount ($)"
@@ -599,6 +742,7 @@ function QuoteProfile() {
                     type="number"
                     value={editableQuoteData.discountUsd}
                     onChange={handleChange}
+                    disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                   />
                 </div>
                 {editableQuoteData.serviceModel === 'subscription' && (
@@ -609,12 +753,22 @@ function QuoteProfile() {
                         <h4 className="text-md font-medium text-gray-800">Billing & Schedule</h4>
                       </div>
                     </div>
+                    {/* --- NEW (USER REQ 3): Years to Project --- */}
+                    <AdminInput
+                      label="Years to Project"
+                      id="paymentScheduleYears"
+                      type="number"
+                      value={editableQuoteData.paymentScheduleYears}
+                      onChange={handleChange}
+                      disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
+                    />
                     <div className="grid grid-cols-2 gap-4">
                       <AdminSelect
                         label="Billing Schedule"
                         id="billingSchedule"
                         value={editableQuoteData.billingSchedule}
                         onChange={handleChange}
+                        disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                       >
                         <option value="standard">Standard</option>
                         <option value="seasonal">Seasonal</option>
@@ -624,6 +778,7 @@ function QuoteProfile() {
                         id="amortStartMonth"
                         value={editableQuoteData.amortStartMonth}
                         onChange={handleChange}
+                        disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                       />
                     </div>
                     {editableQuoteData.billingSchedule === 'seasonal' && (
@@ -633,18 +788,21 @@ function QuoteProfile() {
                             id="yr1SeasonalRange"
                             value={editableQuoteData.yr1SeasonalRange}
                             onChange={handleChange}
+                            disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                           />
                            <AdminInput
                             label="Year 2+ Start (YYYY-MM)"
                             id="yr2StartDate"
                             value={editableQuoteData.yr2StartDate}
                             onChange={handleChange}
+                            disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                           />
                            <AdminInput
                             label="Year 2+ Range (YYYY-MM:YYYY-MM)"
                             id="yr2SeasonalRange"
                             value={editableQuoteData.yr2SeasonalRange}
                             onChange={handleChange}
+                            disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                           />
                        </div>
                     )}
@@ -661,6 +819,7 @@ function QuoteProfile() {
                   type="number"
                   value={editableQuoteData.finalMonthlyFee}
                   onChange={handleChange}
+                  disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                 />
                 <AdminInput
                   label="Included Hours / mo"
@@ -668,6 +827,7 @@ function QuoteProfile() {
                   type="number"
                   value={editableQuoteData.includedHours}
                   onChange={handleChange}
+                  disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                 />
               </SectionWrapper>
             )}
@@ -680,6 +840,7 @@ function QuoteProfile() {
                   type="number"
                   value={editableQuoteData.hours}
                   onChange={handleChange}
+                  disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                 />
                 <PriceDisplay
                   label="Calculated Total"
@@ -692,71 +853,11 @@ function QuoteProfile() {
 
           {/* --- Right Column: Summary / Preview --- */}
           <div className="lg:col-span-2 space-y-6">
-            {/* --- Conditional Preview Panel --- */}
             
-            {(editableQuoteData.serviceModel === 'subscription' || editableQuoteData.serviceModel === 'project') && calculatedFees && (
-              <SectionWrapper title="Live Quote Preview">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <PriceDisplay
-                    label="Due Today"
-                    value={calculatedFees.setupFee}
-                  />
-                  <PriceDisplay
-                    label="Total Monthly"
-                    value={calculatedFees.totalActiveMonthly}
-                  />
-                  <PriceDisplay
-                    label={editableQuoteData.serviceModel === 'subscription' ? 'Buyout Price' : 'Total Project Cost'}
-                    value={editableQuoteData.serviceModel === 'subscription' ? calculatedFees.buyoutPrice : calculatedFees.totalCost}
-                  />
-                </div>
-                
-                {schedule.length > 0 && (
-                  <div className="pt-4 border-t">
-                    <h4 className="text-md font-medium text-gray-800 mb-2">Payment Schedule Preview</h4>
-                    {/* A simple schedule view for admin */}
-                    <div className="max-h-60 overflow-y-auto border rounded-md">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <tbody className="divide-y divide-gray-200 bg-white">
-                          {schedule.slice(0, 13).map((item, index) => ( // Show first 13 rows (setup + 1 year)
-                            <tr key={index} className={item.notes.startsWith('Total') ? 'bg-gray-50 font-medium' : ''}>
-                              <td className="px-4 py-2 text-sm font-medium text-gray-900">{item.date}</td>
-                              <td className="px-4 py-2 text-sm text-gray-500">{item.notes}</td>
-                              <td className="px-4 py-2 text-sm text-gray-500 text-right">
-                                {item.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </SectionWrapper>
-            )}
-            
-            {editableQuoteData.serviceModel === 'maintenance' && (
-              <SectionWrapper title="Quote Summary">
-                <PriceDisplay
-                  label="Monthly Retainer Fee"
-                  value={parseFloat(editableQuoteData.finalMonthlyFee) || 0}
-                />
-              </SectionWrapper>
-            )}
-            
-            {editableQuoteData.serviceModel === 'hourly' && (
-              <SectionWrapper title="Quote Summary">
-                <PriceDisplay
-                  label="Estimated Total Cost"
-                  value={(parseFloat(editableQuoteData.hours) || 0) * (configData.base_rates.hourly_rate || 0)}
-                />
-              </SectionWrapper>
-            )}
-
             {/* --- Status & Links --- */}
             <SectionWrapper title="Quote Status & Links">
                 
-                {/* --- NEW STATUS DISPLAY --- */}
+                {/* --- MODIFIED STATUS DISPLAY --- */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Status</label>
                   <div 
@@ -769,7 +870,7 @@ function QuoteProfile() {
                     {statusInfo.helperText}
                   </p>
                 </div>
-                {/* --- END NEW STATUS DISPLAY --- */}
+                {/* --- END MODIFIED STATUS DISPLAY --- */}
 
                 {isTinkerToy && (
                   <div className="pt-4 border-t border-gray-200"> {/* Added separation */}
@@ -813,7 +914,69 @@ function QuoteProfile() {
                     </div>
                   </div>
                 )}
+                
+                {/* --- NEW (CONTEXT [426]): Show Decline Reason --- */}
+                {currentStatus === 'Declined' && (
+                  <div className="pt-4 border-t border-gray-200">
+                    <h4 className="text-md font-medium text-red-800">Client Decline Reason</h4>
+                    <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-md">
+                      <p className="text-sm text-red-700">
+                        {editableQuoteData.declineReason || "No reason provided."}
+                      </p>
+                    </div>
+                  </div>
+                )}
             </SectionWrapper>
+            
+            {/* --- Conditional Preview Panel --- */}
+            
+            {(editableQuoteData.serviceModel === 'subscription' || editableQuoteData.serviceModel === 'project') && calculatedFees && (
+              <SectionWrapper title="Live Quote Preview">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <PriceDisplay
+                    label="Due Today"
+                    value={calculatedFees.setupFee}
+                  />
+                  <PriceDisplay
+                    label="Total Monthly"
+                    value={calculatedFees.totalActiveMonthly}
+                  D/>
+                  <PriceDisplay
+                    label={editableQuoteData.serviceModel === 'subscription' ? 'Buyout Price' : 'Total Project Cost'}
+                    value={editableQuoteData.serviceModel === 'subscription' ? calculatedFees.buyoutPrice : calculatedFees.totalCost}
+                  />
+                </div>
+                
+                {/* --- MODIFIED (USER REQ 3): Show full schedule --- */}
+                {schedule.length > 0 && (
+                  <div className="pt-4 border-t">
+                    <h4 className="text-md font-medium text-gray-800 mb-2">
+                      Payment Schedule Preview ({editableQuoteData.paymentScheduleYears || '...'} Years)
+                    </h4>
+                    {/* A simple schedule view for admin */}
+                    <AdminScheduleTable schedule={schedule} />
+                  </div>
+                )}
+              </SectionWrapper>
+            )}
+            
+            {editableQuoteData.serviceModel === 'maintenance' && (
+              <SectionWrapper title="Quote Summary">
+                <PriceDisplay
+                  label="Monthly Retainer Fee"
+                  value={parseFloat(editableQuoteData.finalMonthlyFee) || 0}
+                />
+              </SectionWrapper>
+            )}
+            
+            {editableQuoteData.serviceModel === 'hourly' && (
+              <SectionWrapper title="Quote Summary">
+                <PriceDisplay
+                  label="Estimated Total Cost"
+                  value={(parseFloat(editableQuoteData.hours) || 0) * (configData.base_rates.hourly_rate || 0)}
+                />
+              </SectionWrapper>
+            )}
             
           </div>
         </div>

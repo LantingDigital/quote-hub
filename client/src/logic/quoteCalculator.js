@@ -5,6 +5,11 @@
  * V2: Ported from petes-holiday-lighting/quoteCalculator.js
  * This logic is designed to work with the data structure from config.json.
  * It requires the 'date-fns' library to be installed.
+ *
+ * MODIFIED:
+ * - FIX (USER REQ 1.3): The "empty" return object for invalid
+ * choices now includes `features: []` to prevent client-side crash
+ * when accessing `calculatedFees.features.map`.
  */
 
 /**
@@ -62,6 +67,7 @@ export function calculateProject(lockedVars, config) {
     amortizationTerm: 0,
     tierMonthly: 0,
     amortizedMonthly: 0,
+    features: [], // --- ADDED for safety ---
   };
 }
 
@@ -90,6 +96,7 @@ export function calculateSubscription(lockedVars, clientChoices, config) {
       totalActiveMonthly: 0,
       amortizationTerm: 0,
       buyoutPrice: 0,
+      features: [], // --- MODIFIED (USER REQ 1.3) ---
     };
   }
   
@@ -106,6 +113,7 @@ export function calculateSubscription(lockedVars, clientChoices, config) {
       totalActiveMonthly: 0,
       amortizationTerm: 0,
       buyoutPrice: 0,
+      features: [], // --- MODIFIED (USER REQ 1.3) ---
     };
   }
 
@@ -316,7 +324,8 @@ export function generatePaymentSchedule(
   const firstPaymentDate = amortStartObj;
   // Start loop from 1st of *next* month
   let paymentDate = addMonths(startOfMonth(new Date()), 1); 
-  const maxMonthsToShow = (lockedVars.paymentScheduleYears || 2) * 12;
+  // --- MODIFIED (USER REQ 3): Use paymentScheduleYears ---
+  const maxMonthsToShow = (parseInt(lockedVars.paymentScheduleYears, 10) || 2) * 12;
   let hasShownYear2Header = false;
 
   for (let i = 0; i < maxMonthsToShow; i++) {

@@ -3,8 +3,9 @@ client/src/components/StatusBadge.js
 ---
 MODIFIED:
 - (FIX) Updated logic to correctly map old/default statuses
-  ('New', 'Pending', null) to the 'Drafted' pill,
-  which was the cause of 'Pending' text appearing.
+  ('New', 'Pending', null) to the 'Drafted' pill.
+- FEAT (CONTEXT [415, 424]): Added 'Pending Re-send' (Purple 💜)
+  and 'Declined' (Red ❤️) to support the new status lifecycle.
 */
 
 import React from 'react';
@@ -14,6 +15,8 @@ import {
   CheckCircle,
   ShieldCheck,
   AlertTriangle,
+  ArchiveX, // For Declined
+  RefreshCw, // For Pending Re-send
 } from 'lucide-react';
 
 const getStatusInfo = (status) => {
@@ -31,6 +34,14 @@ const getStatusInfo = (status) => {
         textColor: 'text-yellow-800',
         icon: <Clock className="w-4 h-4" />,
         text: 'Sent',
+      };
+    // --- NEW (CONTEXT [415]): Purple Status ---
+    case 'Pending Re-send':
+       return {
+        bgColor: 'bg-purple-100',
+        textColor: 'text-purple-800',
+        icon: <RefreshCw className="w-4 h-4" />,
+        text: 'Pending Re-send',
       };
     case 'Approved':
       return {
@@ -53,14 +64,22 @@ const getStatusInfo = (status) => {
         icon: <AlertTriangle className="w-4 h-4" />,
         text: 'Failed',
       };
-    case 'New': // --- THIS IS THE FIX ---
-    case 'Pending': // --- THIS IS THE FIX ---
+    // --- NEW (CONTEXT [424]): Declined Status ---
+    case 'Declined':
+       return {
+        bgColor: 'bg-red-100',
+        textColor: 'text-red-800',
+        icon: <ArchiveX className="w-4 h-4" />,
+        text: 'Declined',
+      };
+    case 'New': // Handle old statuses
+    case 'Pending':
     default: // Handle 'New', 'Pending', or other old/unknown statuses
       return {
         bgColor: 'bg-gray-100',
         textColor: 'text-gray-800',
         icon: <FileWarning className="w-4 h-4" />,
-        text: 'Drafted', // --- THIS IS THE FIX (was 'status || "Drafted"')
+        text: 'Drafted',
       };
   }
 };
