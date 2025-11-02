@@ -75,7 +75,7 @@ It is intended to be editable by an admin via the `ProductManager.js` page.
 -   `base_rates`: { `hourly_rate`, `default_contingency_buffer_percent`, ... }
 -   `company_info`: { `name`, `contact_name`, `contact_email`, `address` ... }
 -   `models`: {
-    -   `subscription`: { `display_name`, `amortization_terms` (Array of *numbers*, e.g., `[12, 18, 24, 36]`), `tiers` (Object), `payment_options` (Object) }
+    -   `subscription`: { `display_name`, `amortization_terms` (Array of numbers, e.g. `[12, 18, 24, 36]`), `tiers` (Object), `payment_options` (Object) }
     -   `project`: { `display_name`, `description` }
     -   `maintenance`: { `display_name`, `default_fee`, `default_included_hours` }
     -   `hourly`: { `display_name`, `description` }
@@ -87,10 +87,10 @@ It is created by an admin and then edited by both the client (on the "Tinker Toy
 -   **Client Info:** `clientContactName`, `email`, `clientLegalName`, `clientLegalAddress`, `clientEntityType`
 -   **Project Info:** `projectTitle`, `projectScope` (this is a multi-line string, `\n` is preserved)
 -   **System Info:** `serviceModel` (e.g., "subscription"), `status` (e.g., "Drafted", "Sent"), `userId` (admin who created it)
--   **"Tinker Toy" Vars:** `hours`, `buffer`, `discountPct`, `discountUsd`, `billingSchedule`, `amortStartMonth`, `yr1SeasonalRange`, `paymentScheduleYears` (default 10)
+-   **"Tinker Toy" Vars:** `hours`, `buffer`, `discountPct`, `discountUsd`, `discountDurationMonths` (new), `billingSchedule`, `amortStartMonth`, `yr1SeasonalRange`, `paymentScheduleYears` (default 10)
 -   **"Static" Vars:** (Used for non-tinker-toy models like Maintenance) `finalMonthlyFee`, `includedHours`, `finalTotalCost`
 -   **Client Selections:** `selectedTier`, `selectedPaymentPlan`, `selectedAmortizationTerm` (these are set by the client)
--   **Client Feedback:** `declineReason`, `modificationRequest`
+-   **Client Feedback:** `declineReason` (string), `modifyReason` (string, new)
 -   **Generated Docs:** `contractDocs` (Array of objects: `{ name, url, path, generatedAt }`), `lastContractGenerated` (Timestamp)
 
 SECTION 6: PROJECT HISTORY & STATUS
@@ -114,66 +114,61 @@ SECTION 6: PROJECT HISTORY & STATUS
 -   **ACTION (Style):** Implemented the V6 style guide: **Helvetica** font, **0.75" margins**, **Navy Blue** headers, and proper checkbox symbols (**☑ / ☐**).
 -   **ACTION (Tailoring):** Made the contracts dynamic (V7). The `drawMSA` function now wraps service-specific sections in `if (data.serviceModel === "...")` blocks to **omit** irrelevant clauses.
 
-**--- PHASE 1.7: UI & TINKER TOY REFINEMENT (COMPLETE) ---**
--   **GOAL:** Finalize the quote workflow UI and enhance the "Tinker Toy".
--   **ACTION (Task 1):** Reworded the client-facing "Tinker Toy" page (`client/src/pages/ApplicantForm.js`). Changed the main CTA button from "Accept & Generate Contract" to **"Submit Quote"**.
--   **ACTION (Task 2):** Implemented the client-adjustable amortization term. Replaced the `<select>` for "Build Cost Term" with a styled `<input type="range">` **slider**.
--   **ACTION (Task 3):** Fixed the slider to correctly read the simple number array from `config` (fixing the `NaN` bug) and set `step="1"` to allow *all* months in the range to be selected.
--   **ACTION (Task 4):** Expanded payment schedule visibility.
+**--- PHASE 2.0: FULL STATUS LIFECYCLE & UI POLISH (COMPLETE) ---**
+-   **GOAL:** Finalize the quote workflow UI, enhance the "Tinker Toy," and implement a full status lifecycle.
+-   **ACTION (Task 1 - UI):** Reworded the client-facing "Tinker Toy" page (`client/src/pages/QuoteCalculator.js`). Changed the main CTA button to **"Submit Quote"**.
+-   **ACTION (Task 2 - UI):** Implemented a modern, single-column UI design on the `QuoteCalculator.js` page, replacing the sticky column.
+-   **ACTION (Task 3 - UI):** Implemented the client-adjustable amortization term. Replaced the `<select>` for "Build Cost Term" with a styled `<input type="range">` **slider** that allows selection of *every month* between the min/max terms.
+-   **ACTION (Task 4 - UI):** Expanded payment schedule visibility.
     -   Set default `paymentScheduleYears` to **10** in `NewQuoteModal.js`.
 -   Added an admin input to `QuoteProfile.js` to control this value.
 -   Added a dropdown to `QuoteCalculator.js` to allow the client to *view* (not change) 2, 5, or 10-year projections.
--   **ACTION (Task 5):** Refined the `QuoteCalculator.js` UI to use a modern, card-based layout and removed the floating action bar for a cleaner, single-column flow.
--   **ACTION (Task 6):** Added admin visibility for client selections.
+-   **ACTION (Task 5 - Admin UI):** Added admin visibility for client selections.
 `QuoteProfile.js` now has a read-only field to display the `selectedAmortizationTerm` chosen by the client.
-**--- PHASE 1.8: QUOTE STATUS LIFECYCLE (COMPLETE) ---**
--   **GOAL:** Implement a clear, color-coded status workflow for admin and client.
--   **ACTION (Component):** Created a new reusable component, `client/src/components/StatusBadge.js`, to ensure visual consistency.
--   **ACTION (Workflow):**
-    -   **`Drafted` (Gray 🩶):** All new quotes are created with this status (`NewQuoteModal.js`).
--   **`Sent` (Yellow 💛):** Admin clicks a **"Mark as Sent"** button on `QuoteProfile.js` to activate the client link and change the status. Quote is LOCKED on the admin side.
--   **ACTION (New Feature):** Added a **"Retract to Draft"** button (with a confirmation modal) that is *only* visible on `Sent` quotes, allowing an admin to pull back a quote.
+-   **ACTION (Task 6 - Status Lifecycle):** Implemented a clear, color-coded status workflow.
+-   **Component:** Created a reusable component, `client/src/components/StatusBadge.js`.
+-   **Workflow:**
+    -   **`Drafted` (Gray 🩶):** All new quotes are created with this status.
+-   **`Sent` (Yellow 💛):** Admin clicks **"Mark as Sent"** on `QuoteProfile.js`. Admin inputs are **locked**.
 -   **`Approved` (Blue 💙):** Client clicks "Submit Quote" on `QuoteCalculator.js`.
-This locks in their choices and sets the status to `Approved`.
--   **`Pending Re-send` (Purple 💜):** If an admin saves changes to an `Approved` quote, the status *automatically* changes to this new status, requiring a "Re-send" (which uses the "Mark as Sent" button).
 -   **`Contract Generated` (Green 💚):** Admin clicks "Generate Contract(s)" on `QuoteProfile.js`.
 -   **`Generation Failed` (Red ❤️):** The `generateContractV2` function sets this status on an error.
--   **`Declined` (Red ❤️):**
-    -   Client clicks "Decline Quote" on `QuoteCalculator.js`.
--   A modal captures a `declineReason` (or "I'd rather not say").
--   The quote status is set to `Declined`.
--   The admin can view the `declineReason` in `QuoteProfile.js`.
+-   **ACTION (Task 7 - Re-approval Workflow):** Implemented the full re-approval and "off-ramp" logic.
+    -   [cite_start]**`Pending Re-send` (Purple 💜):** When an admin saves changes to an `Approved` quote, the status changes to this [cite: 192-193]. [cite_start]The "Mark as Sent" button becomes "Re-send Quote"[cite: 194].
+    -   [cite_start]**`Retract to Draft` (Button):** Added a **"Retract to Draft"** button (with a confirmation modal) that is *only* visible on `Sent` quotes, reverting the status to `Drafted` [cite: 195-196].
+    -   [cite_start]**`Decline Quote` (Client Feature):** Added a "Decline Quote" button to `QuoteCalculator.js`[cite: 199].
+    -   [cite_start]**`Decline Modal` (Client Feature):** On click, a modal asks for a reason or a checkbox "I'd rather not say"[cite: 200].
+    -   [cite_start]**`Declined` (Red ❤️):** On submit, status is set to `Declined` and the reason is saved to `declineReason`[cite: 201].
+    -   [cite_start]**`Declined` (Admin UI):** `QuoteProfile.js` shows this status and displays the `declineReason`[cite: 203].
 
-**--- PHASE 1.9: CURRENT STATUS ---**
--   **"WHERE WE ARE NOW"**
--   The contract generation pipeline (`generateContractV2`) is **stable, fast (2-5 seconds), and professionally formatted.**
--   The client "Tinker Toy" (`QuoteCalculator.js`) and admin "Control Panel" (`QuoteProfile.js`) are fully functional with the new, modern UI.
--   The *entire* core quote lifecycle is implemented and stable: **Drafted 🩶 → Sent 💛 → Approved 💙 → Contract Generated 💚**.
--   The *exception* lifecycles are also complete: **Sent 💛 → Retract to Draft 🩶**, **Approved 💙 → Edit → Pending Re-send 💜 → Sent 💛**, and **Sent 💛 → Declined ❤️**.
-
-**--- PHASE 2.0: IMMEDIATE NEXT STEPS ---**
+**--- PHASE 2.1: IMMEDIATE NEXT STEPS ---**
 -   **"WHAT'S NEXT ON OUR CHECKLIST"**
--   **GOAL:** Refine the new `Declined` status workflow and add a "soft decline" option for clients, plus implement discount logic.
+-   **GOAL:** Implement discount duration logic and refine the client/admin feedback loop with new status workflows.
 -   **TASK 1 (Logic):** Implement **Discount Duration**.
-    -   **GOAL:** Discounts are currently perpetual.
-We need to define their duration.
+    -   **GOAL:** Discounts are currently perpetual. We need to define their duration.
     -   **ACTION:** Add a `discountDurationMonths` field to the `quotes` data model.
--   **ACTION:** Default this value to **36** in `NewQuoteModal.js`.
--   **ACTION:** Add an `AdminInput` for it in `QuoteProfile.js` so it can be edited.
--   **ACTION:** Update the `generatePaymentSchedule` logic in both `client/src/logic/quoteCalculator.js` and `functions/index.js` to read this value and stop applying the discount after the specified number of months.
--   **TASK 2 (Workflow):** Enhance `Declined` Status Workflow.
-    -   **GOAL:** A `Declined` quote is currently locked forever. We need a way for an admin to re-engage the client.
-    -   **ACTION:** Add a **"Re-open Quote"** button to `QuoteProfile.js` that is *only* visible when a quote's status is `Declined`.
-    -   **ACTION:** This button (with a confirmation) will revert the status from `Declined` back to **`Drafted`** and clear the `declineReason` field, unlocking the form for edits and re-sending.
--   **TASK 3 (Client UI):** Add "Request to Modify" Feature.
-    -   **GOAL:** The client's choice is currently binary (Submit or Decline). We need a "soft-decline" option for minor changes (e.g., "you forgot my discount," "wrong start date").
-    -   **ACTION:** Add a **"Request to Modify Quote"** button to the "Finalize" section of `QuoteCalculator.js`, styled with an **Orange 🟠** theme.
-    -   **ACTION:** On click, show a modal (similar to Decline) that asks for a **required** reason (text area).
-    -   **ACTION:** On submit, update the quote status to **`Request to Modify` (Orange 🟠)** and save the reason to a new `modificationRequest` field.
-    -   **ACTION:** Show a "Thank you, we will review your request" success screen.
-    -   **ACTION:** Update `StatusBadge.js` and `QuoteProfile.js` to show this new `Request to Modify` status and display the `modificationRequest` text. The admin can then make the change, set the status to `Drafted`, and "Mark as Sent" again.
+    -   **ACTION:** Default this value to **36** in `NewQuoteModal.js`.
+    -   **ACTION:** Add an `AdminInput` for it in `QuoteProfile.js` so it can be edited.
+    -   **ACTION:** Update the `generatePaymentSchedule` logic in both `client/src/logic/quoteCalculator.js` and `functions/index.js` to read this value and stop applying the discount after the specified number of months.
+-   **TASK 2 (Workflow):** Refine **`Declined`** Quote Workflow.
+    -   **GOAL:** A `Declined` quote is a dead end. We need a way to resurrect it.
+    -   **ACTION:** On `QuoteProfile.js`, if a quote's status is `Declined`, all inputs must remain **locked**.
+    -   **ACTION:** Add a new button visible only on `Declined` quotes: **"Re-open Quote"**.
+    -   **ACTION:** On click (with confirmation), this button reverts the quote's status to **`Drafted` (Gray 🩶)**, unlocking the fields and allowing the admin to edit and re-send.
+-   **TASK 3 (Workflow):** Add **"Request to Modify"** Feature.
+    -   **GOAL:** Give the client a "soft decline" option for minor changes (e.g., wrong start date, forgotten discount).
+    -   **ACTION (Client UI):** On `QuoteCalculator.js`, add a new button next to "Decline Quote" called **"Request to Modify Quote"**.
+    -   **ACTION (Client UI):** On click, show a modal (similar to decline) that requires a text-area comment for the request.
+    -   **ACTION (Data):** On submit, save the comment to a new `modifyReason` field in the `quote` doc.
+    -   **ACTION (Status):** Create a new status: **`Request to Modify` (Orange 🧡)**.
+    -   **ACTION (Admin UI):** `StatusBadge.js` and `QuoteProfile.js` must show this new status.
+    -   **ACTION (Admin UI):** On `QuoteProfile.js`, display the `modifyReason` in a new "Client Comments" box (similar to the `declineReason` box).
+    -   **ACTION (Admin Workflow):** When an admin views a quote with this status, all inputs are **locked**.
+    -   **ACTION (Admin Workflow):** A new button, **"Edit Quote"**, is visible.
+    -   **ACTION (Admin Workflow):** Clicking "Edit Quote" unlocks the fields for changes.
+    -   **ACTION (Admin Workflow):** When the admin clicks "Save Changes" after editing, the status automatically changes to **`Pending Re-send` (Purple 💜)**, and the normal re-send flow continues.
 
-**--- PHASE 2.1: LONG-TERM ROAD MAP ---**
+**--- PHASE 3.0: LONG-TERM ROAD MAP ---**
 -   **"WHAT TO WORK ON AFTER 'NEXT STEPS' ARE DONE"**
 -   **GOAL:** Evolve from a "Quote Hub" into the full "Client Portal" (see Section 3).
 -   **TASK 1 (Auth):** Refactor Firebase Authentication.
