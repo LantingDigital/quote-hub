@@ -19,7 +19,7 @@ Project Name: Quote Hub & Client Portal
 Author: Lanting Digital LLC
 Original Codebase: automated-hiring-funnel (deceptively named)
 Purpose: A comprehensive Business Operating System (BOS) to manage the entire client lifecycle, from initial quote generation and contract signing to long-term project management and client communication.
-Context Version: v6.3 (Last Updated: 2025-11-03)
+Context Version: v6.4 (Last Updated: 2025-11-03)
 
 SECTION 2: OVERVIEW & CORE PHILOSOPHY
 This application is the central "brain" for all business operations.
@@ -93,7 +93,8 @@ It is created by an admin and then edited by both the client (on the "Tinker Toy
 -   **Client Selections:** `selectedTier`, `selectedPaymentPlan`, `selectedAmortizationTerm` (these are set by the client)
 -   **Client Feedback:** `declineReason` (string), `modifyReason` (string)
 -   **Generated Docs:** `contractDocs` (Array of objects: 
-`{ name, url, path, generatedAt }`), `lastContractGenerated` (Timestamp)
+`{ name, 
+url, path, generatedAt }`), `lastContractGenerated` (Timestamp)
 
 SECTION 6: PROJECT HISTORY & STATUS
 
@@ -120,6 +121,7 @@ SECTION 6: PROJECT HISTORY & STATUS
 -   **GOAL:** Finalize the quote workflow UI, enhance the "Tinker Toy," and implement a full status lifecycle.
 -   **ACTION (Task 1 - UI):** Reworded the client-facing "Tinker Toy" page (`client/src/pages/QuoteCalculator.js`). Changed the main CTA button to **"Submit Quote"**.
 - 
+
   **ACTION (Task 2 - UI):** Implemented a modern, single-column UI design on the `QuoteCalculator.js` page, replacing the sticky column.
 -   **ACTION (Task 3 - UI):** Implemented the client-adjustable amortization term. Replaced the `<select>` for "Build Cost Term" with a styled `<input type="range">` **slider** that allows selection of *every month* between the min/max terms.
 -   **ACTION (Task 4 - UI):** Expanded payment schedule visibility.
@@ -147,25 +149,30 @@ The "Mark as Sent" button becomes "Re-send Quote".
 **--- PHASE 2.1: WORKFLOW REFINEMENTS (COMPLETE) ---**
 -   **GOAL:** Implement discount duration logic and refine the client/admin feedback loop with new status workflows.
 -   **STATUS: ALL TASKS COMPLETE (2025-11-03).**
--   **TASK 1 (Logic):** Implement **Discount Duration**. (COMPLETE)
--   **TASK 2 (Workflow):** Refine **`Declined`** Quote Workflow. (COMPLETE)
--   **TASK 3 (Workflow):** Add **"Request to Modify"** Feature. (COMPLETE)
--   **TASK 4 (Workflow):** Refine **`Retracted`** Quote Workflow. (COMPLETE)
+-   **TASK 1 (Logic):** Implement **Discount Duration**.
+(COMPLETE)
+-   **TASK 2 (Workflow):** Refine **`Declined`** Quote Workflow.
+(COMPLETE)
+-   **TASK 3 (Workflow):** Add **"Request to Modify"** Feature.
+(COMPLETE)
+-   **TASK 4 (Workflow):** Refine **`Retracted`** Quote Workflow.
+(COMPLETE)
 **--- NEW --- PHASE 2.2: SECURITY & TESTING (AUDIT) ---**
 -   **"WHAT'S NEXT ON OUR CHECKLIST"**
 -   **GOAL:** Implement critical recommendations from the code audit before building client-facing auth.
 -   **TASK 1 (Security):** Secure **Firestore Rules**.
     -   **GOAL:** Lock down the database so users can only access their *own* data.
-    -   **ACTION:** Edit `firestore.rules`.
+-   **ACTION:** Edit `firestore.rules`.
     -   **ACTION:** Update the `quotes` collection rules to allow `read`/`update` only if `request.auth.uid == resource.data.userId` (for clients) OR if the user has an admin claim.
-    -   **ACTION:** Update the `config` collection rules to be read-only for clients and write-only for admins.
--   **TASK 2 (Maintainability):** Implement **Unit Tests**.
+-   **ACTION:** Update the `config` collection rules to be read-only for clients and write-only for admins.
+-   **TASK 2 (Maintainability):** Implement **Unit Tests**. (COMPLETE)
     -   **GOAL:** Create Jest tests for our core business logic to prevent future regressions.
-    -   **ACTION:** Create a new test file: `client/src/logic/quoteCalculator.test.js`.
-    -   **ACTION:** Write test cases for `calculateSubscription` and `generatePaymentSchedule` to verify outputs are correct.
+-   **ACTION:** Create a new test file: `client/src/logic/quoteCalculator.test.js`. (COMPLETE)
+-   **ACTION:** Write test cases for `calculateSubscription` and `generatePaymentSchedule`. (COMPLETE)
+    -   **STATUS:** **COMPLETE.** We found and fixed a critical, timezone-dependent bug in the test mock, proving the value of this task. The `quoteCalculator.js` logic is now verified.
 -   **TASK 3 (Cleanup):** Remove **Obsolete Files**.
     -   **GOAL:** Remove the leftover Puppeteer files identified by the auditor.
-    -   **ACTION:** Delete `functions/.puppeteerrc.cjs`.
+-   **ACTION:** Delete `functions/.puppeteerrc.cjs`.
     -   **ACTION:** Edit `functions/package.json` to remove the `puppeteer` dependency.
 **--- PHASE 3.0: LONG-TERM ROAD MAP ---**
 -   **"WHAT TO WORK ON AFTER 'PHASE 2.2' IS DONE"**
