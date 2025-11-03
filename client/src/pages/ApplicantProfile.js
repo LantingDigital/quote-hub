@@ -17,6 +17,18 @@ MODIFIED:
   (Red ❤️) to `getStatusStyles`.
 - FEAT (CONTEXT [426]): Added logic to display `declineReason` if
   status is 'Declined'.
+- FEAT (TASK 2.1.1): Added `discountDurationMonths` to `dataToSave` in handleSave.
+- FEAT (TASK 2.1.1): Added `AdminInput` for `discountDurationMonths`.
+- FEAT (TASK 2.1.2): Updated `isLocked` to also lock inputs if status is 'Declined'.
+- FEAT (TASK 2.1.2): Added `isReopening` state and `ArchiveRestore` icon.
+- FEAT (TASK 2.1.2): Added "Re-open Quote" button, visible only on 'Declined' status.
+- FEAT (TASK 2.1.2): Added `handleReopen` function to revert status to 'Drafted'.
+- FEAT (TASK 2.1.2 & 2.1.4): **[FIX]** Updated `handleSave` to check for
+  `reopenedAt` or `retractedAt` fields, fixing the logic bug.
+- FEAT (BUGFIX): Updated `calculatedFees` useMemo to use default config
+  values if `selectedTier`, `selectedPaymentPlan`, or
+  `selectedAmortizationTerm` are not yet set. This prevents the
+  admin page from showing $0 on new quotes.
 */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -43,6 +55,7 @@ import {
   RotateCcw, // For Retract
   ArchiveX, // For Decline
   RefreshCw, // For Pending Re-send
+  ArchiveRestore, // --- NEW (TASK 2.1.2) ---
 } from 'lucide-react';
 import {
   calculateSubscription,
@@ -196,6 +209,7 @@ function QuoteProfile() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false); // State for 'Mark as Sent'
   const [isRetracting, setIsRetracting] = useState(false); // --- NEW (USER REQ 4.D) ---
+  const [isReopening, setIsReopening] = useState(false); // --- NEW (TASK 2.1.2) ---
   const [error, setError] = useState(null);
   const [alert, setAlert] = useState({ show: false, message: '', isError: false });
   
@@ -270,14 +284,32 @@ function QuoteProfile() {
       buffer: parseFloat(editableQuoteData.buffer) || 0,
       discountPct: parseFloat(editableQuoteData.discountPct) || 0,
       discountUsd: parseFloat(editableQuoteData.discountUsd) || 0,
+      discountDurationMonths: parseInt(editableQuoteData.discountDurationMonths, 10) || 0, // --- ADDED ---
     };
     
-    // Use the client's choices from the quote doc (e.g., "growth", "split_pay")
-    const clientChoices = {
-      tier: editableQuoteData.selectedTier,
-      paymentPlan: editableQuoteData.selectedPaymentPlan,
-      amortizationTerm: parseInt(editableQuoteData.selectedAmortizationTerm, 10),
-    };
+    // --- [FIX] BUGFIX: Use defaults if client selections are missing ---
+    let clientChoices = {};
+    if (editableQuoteData.serviceModel === 'subscription') {
+      // Get default keys from config, just in case
+      const defaultTierKey = Object.keys(configData.models.subscription.tiers)[0];
+      const defaultPaymentKey = Object.keys(configData.models.subscription.payment_options)[0];
+      const defaultAmortizationTerm = configData.models.subscription.amortization_terms[0]; // e.g., 12
+      
+      // Use the client's choices from the quote doc, or fall back to defaults
+      clientChoices = {
+        tier: editableQuoteData.selectedTier || defaultTierKey,
+        paymentPlan: editableQuoteData.selectedPaymentPlan || defaultPaymentKey,
+        amortizationTerm: parseInt(editableQuoteData.selectedAmortizationTerm, 10) || defaultAmortizationTerm,
+      };
+    } else {
+       // For 'project' model, clientChoices is not used, so pass empty
+       clientChoices = {
+        tier: editableQuoteData.selectedTier,
+        paymentPlan: editableQuoteData.selectedPaymentPlan,
+        amortizationTerm: parseInt(editableQuoteData.selectedAmortizationTerm, 10),
+      };
+    }
+    // --- END BUGFIX ---
 
     if (editableQuoteData.serviceModel === 'project') {
       return calculateProject(numericQuoteData, configData);
@@ -303,6 +335,7 @@ function QuoteProfile() {
       buffer: parseFloat(editableQuoteData.buffer) || 0,
       discountPct: parseFloat(editableQuoteData.discountPct) || 0,
       discountUsd: parseFloat(editableQuoteData.discountUsd) || 0,
+      discountDurationMonths: parseInt(editableQuoteData.discountDurationMonths, 10) || 0, // --- ADDED ---
       paymentScheduleYears: parseInt(editableQuoteData.paymentScheduleYears, 10) || 2, // --- MODIFIED (USER REQ 3) ---
     };
 
@@ -362,6 +395,7 @@ function QuoteProfile() {
         buffer: parseFloat(editableQuoteData.buffer) || 0,
         discountPct: parseFloat(editableQuoteData.discountPct) || 0,
         discountUsd: parseFloat(editableQuoteData.discountUsd) || 0,
+        discountDurationMonths: parseInt(editableQuoteData.discountDurationMonths, 10) || 36, // --- ADDED (TASK 2.1.1) ---
         paymentScheduleYears: parseInt(editableQuoteData.paymentScheduleYears, 10) || 10, // --- MODIFIED (USER REQ 3) ---
         // Maintenance
         finalMonthlyFee: parseFloat(editableQuoteData.finalMonthlyFee) || 0,
@@ -372,10 +406,18 @@ function QuoteProfile() {
         contractDocs: editableQuoteData.contractDocs || [], 
       };
       
-      // --- NEW (USER REQ 4.B & CONTEXT [416]): Check status ---
-      // If the quote was 'Approved' and we save changes,
-      // move it to 'Pending Re-send'
+      // --- [FIX] MODIFIED (TASK 2.1.2 & 2.1.4): Status change logic ---
+      
+      // If the quote was 'Approved' and we save changes, move it to 'Pending Re-send'.
       if (quoteData.status === 'Approved') {
+        dataToSave.status = 'Pending Re-send';
+      }
+      
+      // If the current status is 'Drafted', check if it was *ever*
+      // re-opened (from Declined) or retracted (from Sent).
+      // If so, saving changes moves it to 'Pending Re-send'
+      // to force a re-approval.
+      if (quoteData.status === 'Drafted' && (quoteData.reopenedAt || quoteData.retractedAt)) {
         dataToSave.status = 'Pending Re-send';
       }
       // --- End new logic ---
@@ -435,6 +477,28 @@ function QuoteProfile() {
       setAlert({ show: true, message: `Failed to retract: ${err.message}`, isError: true });
     }
     setIsRetracting(false);
+  };
+  
+  // --- NEW (TASK 2.1.2): 'Re-open Quote' Handler ---
+  const handleReopen = async () => {
+     if (!window.confirm("Are you sure you want to re-open this quote? This will move it back to 'Drafted' and unlock it for editing.")) {
+      return;
+    }
+    
+    setIsReopening(true);
+    try {
+      const quoteRef = doc(db, 'quotes', quoteId);
+      await updateDoc(quoteRef, {
+        status: 'Drafted',
+        reopenedAt: new Date(), // Add a timestamp for tracking
+      });
+      // Reload data and show success
+      await loadData(true, 'Quote re-opened to "Drafted"!');
+    } catch (err) {
+      console.error("Error re-opening quote:", err);
+      setAlert({ show: true, message: `Failed to re-open: ${err.message}`, isError: true });
+    }
+    setIsReopening(false);
   };
 
 
@@ -518,8 +582,8 @@ function QuoteProfile() {
   
   const hasContracts = editableQuoteData.contractDocs && editableQuoteData.contractDocs.length > 0;
   
-  // --- NEW (USER REQ 4.A): Lock inputs if status is 'Sent' ---
-  const isLocked = editableQuoteData.status === 'Sent';
+  // --- MODIFIED (TASK 2.1.2): Lock inputs if status is 'Sent' OR 'Declined' ---
+  const isLocked = editableQuoteData.status === 'Sent' || editableQuoteData.status === 'Declined';
   const currentStatus = editableQuoteData.status; // For button logic
 
   // --- MODIFIED (USER REQ 4 & CONTEXT): New Status Badge Logic ---
@@ -595,7 +659,7 @@ function QuoteProfile() {
           icon: <ArchiveX className="w-4 h-4 mr-1.5" />,
           text: 'Declined by Client',
           helperText:
-            'The client has declined this quote. See "Decline Reason" for feedback.',
+            "The client has declined this quote. Click 'Re-open Quote' to unlock it for edits.", // --- MODIFIED (TASK 2.1.2) ---
         };
       case 'New': // Handle old statuses
       case 'Pending':
@@ -637,7 +701,7 @@ function QuoteProfile() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 10 }}
                   onClick={handleSave}
-                  disabled={isSaving || isSending || isGenerating || isRetracting} // --- MODIFIED (USER REQ 4) ---
+                  disabled={isSaving || isSending || isGenerating || isRetracting || isReopening} // --- MODIFIED (TASK 2.1.2) ---
                   className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none disabled:opacity-50"
                 >
                   <Save className="w-5 h-5 mr-2" />
@@ -646,11 +710,23 @@ function QuoteProfile() {
               )}
             </AnimatePresence>
             
+            {/* --- NEW (TASK 2.1.2): 'Re-open Quote' Button --- */}
+            {currentStatus === 'Declined' && (
+              <button
+                onClick={handleReopen}
+                disabled={isGenerating || isSaving || isSending || isRetracting || isReopening || isDirty}
+                className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none disabled:opacity-50"
+              >
+                <ArchiveRestore className="w-5 h-5 mr-2" />
+                {isReopening ? 'Re-opening...' : 'Re-open Quote'}
+              </button>
+            )}
+            
             {/* --- NEW (USER REQ 4.D): 'Retract to Draft' Button --- */}
             {currentStatus === 'Sent' && (
               <button
                 onClick={handleRetract}
-                disabled={isGenerating || isSaving || isSending || isRetracting || isDirty}
+                disabled={isGenerating || isSaving || isSending || isRetracting || isReopening || isDirty} // --- MODIFIED (TASK 2.1.2) ---
                 className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md shadow-sm hover:bg-red-700 focus:outline-none disabled:opacity-50"
               >
                 <RotateCcw className="w-5 h-5 mr-2" />
@@ -662,7 +738,7 @@ function QuoteProfile() {
             {(currentStatus === 'Drafted' || currentStatus === 'New' || currentStatus === 'Pending' || currentStatus === 'Pending Re-send') && (
               <button
                 onClick={handleMarkAsSent}
-                disabled={isGenerating || isSaving || isSending || isRetracting || isDirty}
+                disabled={isGenerating || isSaving || isSending || isRetracting || isReopening || isDirty} // --- MODIFIED (TASK 2.1.2) ---
                 className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none disabled:opacity-50"
               >
                 <Send className="w-5 h-5 mr-2" />
@@ -673,7 +749,7 @@ function QuoteProfile() {
             {/* --- Generate Contract(s) Button --- */}
             <button
               onClick={handleGenerateContracts}
-              disabled={isGenerating || isSaving || isSending || isRetracting || isDirty || (currentStatus !== 'Approved' && currentStatus !== 'Generation Failed')}
+              disabled={isGenerating || isSaving || isSending || isRetracting || isReopening || isDirty || (currentStatus !== 'Approved' && currentStatus !== 'Generation Failed')} // --- MODIFIED (TASK 2.1.2) ---
               className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none disabled:opacity-50"
             >
               <FileText className="w-5 h-5 mr-2" />
@@ -745,6 +821,21 @@ function QuoteProfile() {
                     disabled={isLocked} // --- MODIFIED (USER REQ 4.A) ---
                   />
                 </div>
+                
+                {/* --- ADDED (TASK 2.1.1) --- */}
+                <div className="pt-4 border-t border-gray-100">
+                  <AdminInput
+                    label="Discount Duration (Months)"
+                    id="discountDurationMonths"
+                    type="number"
+                    value={editableQuoteData.discountDurationMonths}
+                    onChange={handleChange}
+                    disabled={isLocked}
+                    placeholder="e.g., 36"
+                  />
+                </div>
+                {/* --- END ADDED --- */}
+
                 {editableQuoteData.serviceModel === 'subscription' && (
                   <>
                     <div className="pt-2 border-t border-gray-100">

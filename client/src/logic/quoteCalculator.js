@@ -10,6 +10,9 @@
  * - FIX (USER REQ 1.3): The "empty" return object for invalid
  * choices now includes `features: []` to prevent client-side crash
  * when accessing `calculatedFees.features.map`.
+ * - FEAT (TASK 2.1.1): Updated `generatePaymentSchedule` to read
+ * `discountDurationMonths` and stop applying discounts after the
+ * specified number of months.
  */
 
 /**
@@ -230,7 +233,12 @@ export function generatePaymentSchedule(
   } = dateFns;
 
   const schedule = [];
-  const { discountUsd, discountPct, discountDuration } = lockedVars;
+  // --- MODIFIED (TASK 2.1.1): Read discountDurationMonths ---
+  const {
+    discountDurationMonths, // e.g., "36"
+  } = lockedVars;
+  // --- END MODIFIED ---
+  
   const {
     setupFee,
     amortizedMonthly,
@@ -359,8 +367,11 @@ export function generatePaymentSchedule(
         firstPaymentDate
       );
 
-      const isDiscountActive =
-        !discountDuration || paymentMonthIdx < discountDuration;
+      // --- MODIFIED (TASK 2.1.1): Check if discount is active ---
+      const durationInMonths = parseInt(discountDurationMonths, 10) || 0;
+      // A duration of 0 means the discount is perpetual.
+      const isDiscountActive = durationInMonths === 0 || paymentMonthIdx < durationInMonths;
+      // --- END MODIFIED ---
 
       // --- 1. Amortization Payment ---
       let currentAmortPayment = 0;
