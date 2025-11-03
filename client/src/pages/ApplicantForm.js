@@ -14,6 +14,12 @@ MODIFIED:
   moved the "Submit Quote" button into it, above the "Decline" button.
 - (USER REQ 4) Kept the import for '../components/DeclineModal'.
 - (USER REQ 5) Kept the functional 2/5/10 year schedule view dropdown.
+- FEAT (TASK 2.1.3): Imported `ModifyModal` and `MessageSquare` icon.
+- FEAT (TASK 2.1.3): Added `showModifyModal` and `isModifying` state.
+- FEAT (TASK 2.1.3): Added "Request to Modify Quote" button.
+- FEAT (TASK 2.1.3): Added `handleModifySubmit` function.
+- FEAT (TASK 2.1.3): Added `<ModifyModal />` to the render.
+- FEAT (TASK 2.1.3): Added `isModifySuccess` state for success screen.
 */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -36,6 +42,8 @@ import {
   HelpCircle,
   ThumbsDown,
   Smile,
+  MessageSquare, // --- NEW (TASK 2.1.3) ---
+  Edit3, // --- NEW (TASK 2.1.3) ---
 } from 'lucide-react';
 import {
   Disclosure,
@@ -43,6 +51,7 @@ import {
   DisclosurePanel,
 } from '@headlessui/react';
 import DeclineModal from '../components/DeclineModal'; // This file is now provided below
+import ModifyModal from '../components/ModifyModal'; // --- NEW (TASK 2.1.3) ---
 
 // Import all required date-fns functions
 import {
@@ -152,6 +161,12 @@ export default function QuoteCalculator() {
   const [isDeclining, setIsDeclining] = useState(false);
   const [isDeclined, setIsDeclined] = useState(false);
 
+  // --- NEW (TASK 2.1.3) ---
+  const [showModifyModal, setShowModifyModal] = useState(false);
+  const [isModifying, setIsModifying] = useState(false);
+  const [isModifySuccess, setIsModifySuccess] = useState(false);
+  // --- END NEW ---
+
   const [clientChoices, setClientChoices] = useState({
     tier: '',
     paymentPlan: '',
@@ -196,6 +211,14 @@ export default function QuoteCalculator() {
           setIsLoading(false);
           return;
         }
+        
+        // --- NEW (TASK 2.1.3) ---
+        if (quote.status === 'Request to Modify') {
+          setIsModifySuccess(true); // Show success if already submitted
+          setIsLoading(false);
+          return;
+        }
+        // --- END NEW ---
 
         if (!['Sent', 'Pending Re-send', 'Approved'].includes(quote.status)) {
           setError('This quote is not currently active.');
@@ -331,6 +354,27 @@ export default function QuoteCalculator() {
     }
     setIsDeclining(false);
   };
+  
+  // --- NEW (TASK 2.1.3) ---
+  const handleModifySubmit = async (reason) => {
+    setIsModifying(true);
+    setError(null);
+    try {
+      const quoteRef = doc(db, 'quotes', quoteId);
+      await updateDoc(quoteRef, {
+        status: 'Request to Modify',
+        modifyReason: reason,
+        modifyRequestedAt: new Date(),
+      });
+      setShowModifyModal(false);
+      setIsModifySuccess(true);
+    } catch (err) {
+      console.error('Error requesting modification:', err);
+      setError('Failed to submit request. Please try again.');
+    }
+    setIsModifying(false);
+  };
+  // --- END NEW ---
 
   // --- Render States ---
   if (isLoading) {
@@ -372,6 +416,30 @@ export default function QuoteCalculator() {
       </div>
     );
   }
+  
+  // --- NEW (TASK 2.1.3) ---
+  if (isModifySuccess) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3 }}
+          className="text-center bg-white p-10 rounded-2xl shadow-xl"
+        >
+          <MessageSquare className="w-16 h-16 text-blue-500 mx-auto" />
+          <h2 className="mt-6 text-2xl font-bold text-gray-900">
+            Request Received!
+          </h2>
+          <p className="mt-2 text-gray-600 max-w-md">
+            Thank you! We have received your modification request and will
+            be in touch shortly to review the changes.
+          </p>
+        </motion.div>
+      </div>
+    );
+  }
+  // --- END NEW ---
 
   if (submitSuccess) {
     return (
@@ -679,7 +747,7 @@ export default function QuoteCalculator() {
                 <button
                   type="button"
                   onClick={handleSubmit} // Trigger submit manually
-                  disabled={isSubmitting || isDeclining}
+                  disabled={isSubmitting || isDeclining || isModifying}
                   className="flex items-center justify-center w-full px-8 py-3 text-base font-medium text-white bg-blue-600 border border-transparent rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400"
                 >
                   {isSubmitting ? (
@@ -692,18 +760,33 @@ export default function QuoteCalculator() {
 
                 <div className="mt-4 text-center">
                   <p className="text-sm text-gray-500">
-                    Or, if this isn't a good fit:
+                    Or, if this isn't a perfect fit:
                   </p>
-                  {/* Decline Button */}
-                  <button
-                    type="button"
-                    onClick={() => setShowDeclineModal(true)}
-                    disabled={isSubmitting || isDeclining}
-                    className="inline-flex items-center justify-center mt-2 px-6 py-2 text-base font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500"
-                  >
-                    <ThumbsDown className="w-5 h-5 mr-2" />
-                    Decline This Quote
-                  </button>
+                  
+                  {/* --- NEW (TASK 2.1.3) --- */}
+                  <div className="flex flex-col sm:flex-row gap-2 justify-center mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowModifyModal(true)}
+                      disabled={isSubmitting || isDeclining || isModifying}
+                      className="inline-flex items-center justify-center px-4 py-2 text-base font-medium text-blue-700 bg-blue-100 rounded-lg hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                    >
+                      <Edit3 className="w-5 h-5 mr-2" />
+                      Request to Modify
+                    </button>
+                    
+                    {/* Decline Button */}
+                    <button
+                      type="button"
+                      onClick={() => setShowDeclineModal(true)}
+                      disabled={isSubmitting || isDeclining || isModifying}
+                      className="inline-flex items-center justify-center px-4 py-2 text-base font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50"
+                    >
+                      <ThumbsDown className="w-5 h-5 mr-2" />
+                      Decline This Quote
+                    </button>
+                  </div>
+                  {/* --- END NEW --- */}
                 </div>
               </Section>
             </div>
@@ -720,6 +803,15 @@ export default function QuoteCalculator() {
         onSubmit={handleDeclineSubmit}
         isLoading={isDeclining}
       />
+      
+      {/* --- NEW (TASK 2.1.3) --- */}
+      <ModifyModal
+        isOpen={showModifyModal}
+        onClose={() => setShowModifyModal(false)}
+        onSubmit={handleModifySubmit}
+        isLoading={isModifying}
+      />
+      {/* --- END NEW --- */}
     </>
   );
 }

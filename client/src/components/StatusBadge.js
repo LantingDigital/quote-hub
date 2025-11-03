@@ -6,6 +6,7 @@ MODIFIED:
   ('New', 'Pending', null) to the 'Drafted' pill.
 - FEAT (CONTEXT [415, 424]): Added 'Pending Re-send' (Purple 💜)
   and 'Declined' (Red ❤️) to support the new status lifecycle.
+- FEAT (TASK 2.1.3): Added 'Request to Modify' (Orange 🧡).
 */
 
 import React from 'react';
@@ -17,6 +18,7 @@ import {
   AlertTriangle,
   ArchiveX, // For Declined
   RefreshCw, // For Pending Re-send
+  MessageSquare, // --- NEW (TASK 2.1.3) ---
 } from 'lucide-react';
 
 const getStatusInfo = (status) => {
@@ -42,6 +44,14 @@ const getStatusInfo = (status) => {
         textColor: 'text-purple-800',
         icon: <RefreshCw className="w-4 h-4" />,
         text: 'Pending Re-send',
+      };
+    // --- NEW (TASK 2.1.3): Orange Status ---
+    case 'Request to Modify':
+       return {
+        bgColor: 'bg-orange-100',
+        textColor: 'text-orange-800',
+        icon: <MessageSquare className="w-4 h-4" />,
+        text: 'Request to Modify',
       };
     case 'Approved':
       return {

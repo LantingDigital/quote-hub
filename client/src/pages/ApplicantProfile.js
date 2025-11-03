@@ -29,6 +29,16 @@ MODIFIED:
   values if `selectedTier`, `selectedPaymentPlan`, or
   `selectedAmortizationTerm` are not yet set. This prevents the
   admin page from showing $0 on new quotes.
+- FEAT (TASK 2.1.3): Added `MessageSquare` and `Edit3` icons.
+- FEAT (TASK 2.1.3): Added `isEditing` state for 'Request to Modify' flow.
+- FEAT (TASK 2.1.3): Added 'Request to Modify' (Orange 🧡) to `getStatusStyles`.
+- FEAT (TASK 2.1.3): Updated `isLocked` to be true if status is
+  'Request to Modify' AND `isEditing` is false.
+- FEAT (TASK 2.1.3): Added "Edit Quote" button, visible only on
+  'Request to Modify' status.
+- FEAT (TASK 2.1.3): Added "Client Comments" box to display `modifyReason`.
+- FEAT (TASK 2.1.3): Updated `handleSave` to set status to
+  'Pending Re-send' if it was 'Request to Modify'.
 */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -56,6 +66,8 @@ import {
   ArchiveX, // For Decline
   RefreshCw, // For Pending Re-send
   ArchiveRestore, // --- NEW (TASK 2.1.2) ---
+  MessageSquare, // --- NEW (TASK 2.1.3) ---
+  Edit3, // --- NEW (TASK 2.1.3) ---
 } from 'lucide-react';
 import {
   calculateSubscription,
@@ -210,11 +222,13 @@ function QuoteProfile() {
   const [isSending, setIsSending] = useState(false); // State for 'Mark as Sent'
   const [isRetracting, setIsRetracting] = useState(false); // --- NEW (USER REQ 4.D) ---
   const [isReopening, setIsReopening] = useState(false); // --- NEW (TASK 2.1.2) ---
+  const [isEditing, setIsEditing] = useState(false); // --- NEW (TASK 2.1.3) ---
   const [error, setError] = useState(null);
   const [alert, setAlert] = useState({ show: false, message: '', isError: false });
   
   // Re-usable function to load/reload data
   const loadData = async (showAlert = false, message = '') => {
+    setIsEditing(false); // --- NEW (TASK 2.1.3): Reset editing state on every load
     try {
       if (!quoteId) {
         setError('No quote ID provided.');
@@ -420,6 +434,15 @@ function QuoteProfile() {
       if (quoteData.status === 'Drafted' && (quoteData.reopenedAt || quoteData.retractedAt)) {
         dataToSave.status = 'Pending Re-send';
       }
+      
+      // --- NEW (TASK 2.1.3) ---
+      // If the status was 'Request to Modify' (and we're now saving),
+      // set it to 'Pending Re-send'.
+      if (quoteData.status === 'Request to Modify') {
+        dataToSave.status = 'Pending Re-send';
+      }
+      // --- END NEW ---
+      
       // --- End new logic ---
 
       const quoteRef = doc(db, 'quotes', quoteId);
@@ -582,9 +605,13 @@ function QuoteProfile() {
   
   const hasContracts = editableQuoteData.contractDocs && editableQuoteData.contractDocs.length > 0;
   
-  // --- MODIFIED (TASK 2.1.2): Lock inputs if status is 'Sent' OR 'Declined' ---
-  const isLocked = editableQuoteData.status === 'Sent' || editableQuoteData.status === 'Declined';
   const currentStatus = editableQuoteData.status; // For button logic
+  
+  // --- MODIFIED (TASK 2.1.3): Lock inputs logic ---
+  const isLocked =
+    ['Sent', 'Declined'].includes(currentStatus) ||
+    (currentStatus === 'Request to Modify' && !isEditing);
+  // --- END MODIFIED ---
 
   // --- MODIFIED (USER REQ 4 & CONTEXT): New Status Badge Logic ---
   const getStatusStyles = (status) => {
@@ -619,6 +646,17 @@ function QuoteProfile() {
           text: 'Pending Re-send',
           helperText:
             "Changes were made after client approval. Review and 'Mark as Sent' to re-send.",
+        };
+      // --- NEW (TASK 2.1.3): Orange Status ---
+      case 'Request to Modify':
+        return {
+          bgColor: 'bg-orange-100',
+          textColor: 'text-orange-800',
+          borderColor: 'border-orange-200',
+          icon: <MessageSquare className="w-4 h-4 mr-1.5" />,
+          text: 'Request to Modify',
+          helperText:
+            "Client requested changes. See 'Client Comments' and click 'Edit Quote' to unlock.",
         };
       case 'Approved':
         return {
@@ -676,6 +714,8 @@ function QuoteProfile() {
   };
   const statusInfo = getStatusStyles(currentStatus);
   // --- End Status Badge Logic ---
+  
+  const allButtonsDisabled = isSaving || isSending || isGenerating || isRetracting || isReopening;
 
   return (
     <>
@@ -701,7 +741,7 @@ function QuoteProfile() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 10 }}
                   onClick={handleSave}
-                  disabled={isSaving || isSending || isGenerating || isRetracting || isReopening} // --- MODIFIED (TASK 2.1.2) ---
+                  disabled={allButtonsDisabled} // --- MODIFIED (TASK 2.1.3) ---
                   className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none disabled:opacity-50"
                 >
                   <Save className="w-5 h-5 mr-2" />
@@ -710,11 +750,23 @@ function QuoteProfile() {
               )}
             </AnimatePresence>
             
+            {/* --- NEW (TASK 2.1.3): 'Edit Quote' Button --- */}
+            {currentStatus === 'Request to Modify' && !isEditing && (
+              <button
+                onClick={() => setIsEditing(true)}
+                disabled={allButtonsDisabled || isDirty}
+                className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none disabled:opacity-50"
+              >
+                <Edit3 className="w-5 h-5 mr-2" />
+                Edit Quote
+              </button>
+            )}
+            
             {/* --- NEW (TASK 2.1.2): 'Re-open Quote' Button --- */}
             {currentStatus === 'Declined' && (
               <button
                 onClick={handleReopen}
-                disabled={isGenerating || isSaving || isSending || isRetracting || isReopening || isDirty}
+                disabled={allButtonsDisabled || isDirty}
                 className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none disabled:opacity-50"
               >
                 <ArchiveRestore className="w-5 h-5 mr-2" />
@@ -726,7 +778,7 @@ function QuoteProfile() {
             {currentStatus === 'Sent' && (
               <button
                 onClick={handleRetract}
-                disabled={isGenerating || isSaving || isSending || isRetracting || isReopening || isDirty} // --- MODIFIED (TASK 2.1.2) ---
+                disabled={allButtonsDisabled || isDirty}
                 className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md shadow-sm hover:bg-red-700 focus:outline-none disabled:opacity-50"
               >
                 <RotateCcw className="w-5 h-5 mr-2" />
@@ -738,7 +790,7 @@ function QuoteProfile() {
             {(currentStatus === 'Drafted' || currentStatus === 'New' || currentStatus === 'Pending' || currentStatus === 'Pending Re-send') && (
               <button
                 onClick={handleMarkAsSent}
-                disabled={isGenerating || isSaving || isSending || isRetracting || isReopening || isDirty} // --- MODIFIED (TASK 2.1.2) ---
+                disabled={allButtonsDisabled || isDirty}
                 className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none disabled:opacity-50"
               >
                 <Send className="w-5 h-5 mr-2" />
@@ -749,7 +801,7 @@ function QuoteProfile() {
             {/* --- Generate Contract(s) Button --- */}
             <button
               onClick={handleGenerateContracts}
-              disabled={isGenerating || isSaving || isSending || isRetracting || isReopening || isDirty || (currentStatus !== 'Approved' && currentStatus !== 'Generation Failed')} // --- MODIFIED (TASK 2.1.2) ---
+              disabled={allButtonsDisabled || isDirty || (currentStatus !== 'Approved' && currentStatus !== 'Generation Failed')} // --- MODIFIED (TASK 2.1.2) ---
               className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none disabled:opacity-50"
             >
               <FileText className="w-5 h-5 mr-2" />
@@ -1002,6 +1054,18 @@ function QuoteProfile() {
                           Download {doc.name}
                         </a>
                       ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* --- NEW (TASK 2.1.3): Show Modify Reason --- */}
+                {currentStatus === 'Request to Modify' && (
+                  <div className="pt-4 border-t border-gray-200">
+                    <h4 className="text-md font-medium text-orange-800">Client Comments</h4>
+                    <div className="mt-2 p-3 bg-orange-50 border border-orange-200 rounded-md">
+                      <p className="text-sm text-orange-700">
+                        {editableQuoteData.modifyReason || "No reason provided."}
+                      </p>
                     </div>
                   </div>
                 )}
