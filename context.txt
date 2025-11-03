@@ -19,7 +19,7 @@ Project Name: Quote Hub & Client Portal
 Author: Lanting Digital LLC
 Original Codebase: automated-hiring-funnel (deceptively named)
 Purpose: A comprehensive Business Operating System (BOS) to manage the entire client lifecycle, from initial quote generation and contract signing to long-term project management and client communication.
-Context Version: v6.1 (Last Updated: 2025-11-03)
+Context Version: v6.3 (Last Updated: 2025-11-03)
 
 SECTION 2: OVERVIEW & CORE PHILOSOPHY
 This application is the central "brain" for all business operations.
@@ -144,41 +144,31 @@ The "Mark as Sent" button becomes "Re-send Quote".
 -   **`Decline Modal` (Client Feature):** On click, a modal asks for a reason or a checkbox "I'd rather not say".
 -   **`Declined` (Red ❤️):** On submit, status is set to `Declined` and the reason is saved to `declineReason`.
 -   **`Declined` (Admin UI):** `QuoteProfile.js` shows this status and displays the `declineReason`.
-**--- PHASE 2.1: IMMEDIATE NEXT STEPS ---**
--   **"WHAT'S NEXT ON OUR CHECKLIST"**
+**--- PHASE 2.1: WORKFLOW REFINEMENTS (COMPLETE) ---**
 -   **GOAL:** Implement discount duration logic and refine the client/admin feedback loop with new status workflows.
--   **TASK 1 (Logic):** Implement **Discount Duration**.
-    -   **GOAL:** Discounts are currently perpetual.
-We need to define their duration.
-    -   **ACTION:** Add a `discountDurationMonths` field to the `quotes` data model.
--   **ACTION:** Default this value to **36** in `NewQuoteModal.js`.
--   **ACTION:** Add an `AdminInput` for it in `QuoteProfile.js` so it can be edited.
--   **ACTION:** Update the `generatePaymentSchedule` logic in both `client/src/logic/quoteCalculator.js` and `functions/index.js` to read this value and stop applying the discount after the specified number of months.
-    -   **STATUS: COMPLETE (2025-11-03)**
--   **TASK 2 (Workflow):** Refine **`Declined`** Quote Workflow.
--   **GOAL:** A `Declined` quote is a dead end. We need a way to resurrect it.
--   **ACTION:** On `QuoteProfile.js`, if a quote's status is `Declined`, all inputs must remain **locked**.
--   **ACTION:** Add a new button visible only on `Declined` quotes: **"Re-open Quote"**.
--   **ACTION:** On click (with confirmation), this button reverts the quote's status to **`Drafted` (Gray 🩶)**, unlocking the fields and allowing the admin to edit.
--   **NEW ACTION (Admin Workflow):** If the admin clicks "Save Changes" while the quote is in this `Drafted` state (after being re-opened), its status must automatically change to **`Pending Re-send` (Purple 💜)** to ensure it goes through the re-approval flow.
--   **TASK 3 (Workflow):** Add **"Request to Modify"** Feature.
--   **GOAL:** Give the client a "soft decline" option for minor changes (e.g., wrong start date, forgotten discount).
--   **ACTION (Client UI):** On `QuoteCalculator.js`, add a new button next to "Decline Quote" called **"Request to Modify Quote"**.
--   **ACTION (Client UI):** On click, show a modal (similar to decline) that requires a text-area comment for the request.
--   **ACTION (Data):** On submit, save the comment to a new `modifyReason` field in the `quote` doc.
--   **ACTION (Status):** Create a new status: **`Request to Modify` (Orange 🧡)**.
--   **ACTION (Admin UI):** `StatusBadge.js` and `QuoteProfile.js` must show this new status.
--   **ACTION (Admin UI):** On `QuoteProfile.js`, display the `modifyReason` in a new "Client Comments" box (similar to the `declineReason` box).
--   **ACTION (Admin Workflow):** When an admin views a quote with this status, all inputs are **locked**.
--   **ACTION (Admin Workflow):** A new button, **"Edit Quote"**, is visible.
--   **ACTION (Admin Workflow):** Clicking "Edit Quote" unlocks the fields for changes.
--   **ACTION (Admin Workflow):** When the admin clicks "Save Changes" after editing, the status automatically changes to **`Pending Re-send` (Purple 💜)**, and the normal re-send flow continues.
--   **NEW TASK 4 (Workflow):** Refine **`Retracted`** Quote Workflow.
-    -   **GOAL:** A quote that is `Retracted to Draft` should not be allowed to be re-sent without going through the proper re-approval status change, as the client may have seen the previous version.
-    -   **ACTION (Admin Workflow):** The "Retract to Draft" button reverts the status to `Drafted` (Gray 🩶).
-    -   **ACTION (Admin Workflow):** If the admin clicks "Save Changes" while the quote is in this `Drafted` state (after being retracted), its status must automatically change to **`Pending Re-send` (Purple 💜)**.
+-   **STATUS: ALL TASKS COMPLETE (2025-11-03).**
+-   **TASK 1 (Logic):** Implement **Discount Duration**. (COMPLETE)
+-   **TASK 2 (Workflow):** Refine **`Declined`** Quote Workflow. (COMPLETE)
+-   **TASK 3 (Workflow):** Add **"Request to Modify"** Feature. (COMPLETE)
+-   **TASK 4 (Workflow):** Refine **`Retracted`** Quote Workflow. (COMPLETE)
+**--- NEW --- PHASE 2.2: SECURITY & TESTING (AUDIT) ---**
+-   **"WHAT'S NEXT ON OUR CHECKLIST"**
+-   **GOAL:** Implement critical recommendations from the code audit before building client-facing auth.
+-   **TASK 1 (Security):** Secure **Firestore Rules**.
+    -   **GOAL:** Lock down the database so users can only access their *own* data.
+    -   **ACTION:** Edit `firestore.rules`.
+    -   **ACTION:** Update the `quotes` collection rules to allow `read`/`update` only if `request.auth.uid == resource.data.userId` (for clients) OR if the user has an admin claim.
+    -   **ACTION:** Update the `config` collection rules to be read-only for clients and write-only for admins.
+-   **TASK 2 (Maintainability):** Implement **Unit Tests**.
+    -   **GOAL:** Create Jest tests for our core business logic to prevent future regressions.
+    -   **ACTION:** Create a new test file: `client/src/logic/quoteCalculator.test.js`.
+    -   **ACTION:** Write test cases for `calculateSubscription` and `generatePaymentSchedule` to verify outputs are correct.
+-   **TASK 3 (Cleanup):** Remove **Obsolete Files**.
+    -   **GOAL:** Remove the leftover Puppeteer files identified by the auditor.
+    -   **ACTION:** Delete `functions/.puppeteerrc.cjs`.
+    -   **ACTION:** Edit `functions/package.json` to remove the `puppeteer` dependency.
 **--- PHASE 3.0: LONG-TERM ROAD MAP ---**
--   **"WHAT TO WORK ON AFTER 'NEXT STEPS' ARE DONE"**
+-   **"WHAT TO WORK ON AFTER 'PHASE 2.2' IS DONE"**
 -   **GOAL:** Evolve from a "Quote Hub" into the full "Client Portal" (see Section 3).
 -   **TASK 1 (Auth):** Refactor Firebase Authentication.
     -   Create a client-facing "Sign Up" and "Login" flow.

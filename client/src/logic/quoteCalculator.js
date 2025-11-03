@@ -13,6 +13,11 @@
  * - FEAT (TASK 2.1.1): Updated `generatePaymentSchedule` to read
  * `discountDurationMonths` and stop applying discounts after the
  * specified number of months.
+ * - [FIX (TASK 2.2.2)]:** Removed old `discountDuration` variable
+ * and corrected `isDiscountActive` logic to use `durationInMonths`.
+ * This fixes the unit test failure.
+ * - **[FIX 5 (TASK 2.2.2)]:** Corrected variable scope and TYPO.
+ * `tierDiscountVal` is now correctly `tierMonthlyDiscountVal`.
  */
 
 /**
@@ -102,7 +107,7 @@ export function calculateSubscription(lockedVars, clientChoices, config) {
       features: [], // --- MODIFIED (USER REQ 1.3) ---
     };
   }
-  
+
   const tierConfig = modelConfig.tiers[tierKey];
   const paymentConfig = modelConfig.payment_options[paymentKey];
 
@@ -160,8 +165,13 @@ export function calculateSubscription(lockedVars, clientChoices, config) {
     amortizationTerm > 0 ? remainingBuildCost / amortizationTerm : 0;
   const tierMonthlySubtotal = tierConfig.monthly_rate;
 
+  // --- [FIX 5 (TASK 2.2.2)] ---
+  // Declare variables in the outer scope
   let amortizedDiscountVal = 0;
+  let tierMonthlyDiscountVal = 0; // <-- This was the missing declaration in Attempt 5
+
   if (!isAmortExempt) {
+    // Assign value inside the block
     amortizedDiscountVal = getDiscountAmount(
       amortizedMonthlySubtotal,
       lockedVars.discountUsd,
@@ -169,17 +179,20 @@ export function calculateSubscription(lockedVars, clientChoices, config) {
     );
   }
 
-  let tierDiscountVal = 0;
   if (!exemptions.includes('tier')) {
-    tierDiscountVal = getDiscountAmount(
+    // Assign value inside the block
+    tierMonthlyDiscountVal = getDiscountAmount(
       tierMonthlySubtotal,
       lockedVars.discountUsd,
       lockedVars.discountPct
     );
   }
+  // --- END FIX ---
 
   const finalAmortizedMonthly = amortizedMonthlySubtotal - amortizedDiscountVal;
-  const finalTierMonthly = tierMonthlySubtotal - tierDiscountVal;
+  // --- [THE FIX] ---
+  const finalTierMonthly = tierMonthlySubtotal - tierMonthlyDiscountVal; // <-- Use correct variable
+  // --- END FIX ---
 
   // Return a clean object with all the calculated fees
   return {
@@ -189,7 +202,7 @@ export function calculateSubscription(lockedVars, clientChoices, config) {
     tierMonthly: finalTierMonthly,
     totalActiveMonthly: finalAmortizedMonthly + finalTierMonthly,
     amortizedMonthlyDiscountVal: amortizedDiscountVal,
-    tierMonthlyDiscountVal: tierDiscountVal,
+    tierMonthlyDiscountVal: tierMonthlyDiscountVal, // <-- **THIS WAS THE FIX**
     amortizationTerm: amortizationTerm,
     buyoutPrice: finalBuildCostForBuyout,
     // Also pass through descriptions
@@ -197,7 +210,9 @@ export function calculateSubscription(lockedVars, clientChoices, config) {
     tierDescription: tierConfig.description,
     planName: paymentConfig.name,
     planDescription: paymentConfig.description,
-    features: Array.isArray(tierConfig.features_list) ? tierConfig.features_list : [],
+    features: Array.isArray(tierConfig.features_list)
+      ? tierConfig.features_list
+      : [],
   };
 }
 
@@ -217,35 +232,46 @@ export function generatePaymentSchedule(
 ) {
   // Check if date-fns is provided
   if (!dateFns || typeof dateFns.addMonths !== 'function') {
-    console.error("date-fns library is required for generatePaymentSchedule");
+    console.error('date-fns library is required for generatePaymentSchedule');
     return {
       schedule: [
-        { date: "Error", amount: 0, notes: "Missing date library" }
+        { date: 'Error', amount: 0, notes: 'Missing date library' },
       ],
       totalCost: 0,
     };
   }
-  
-  const { 
-    addMonths, startOfMonth, parse, isValid, 
-    getMonth, format, isAfter, isBefore, 
-    differenceInCalendarMonths, addYears, isSameDay 
+
+  const {
+    addMonths,
+    startOfMonth,
+    parse,
+    isValid,
+    getMonth,
+    format,
+    isAfter,
+    isBefore,
+    differenceInCalendarMonths,
+    addYears,
+    isSameDay,
   } = dateFns;
 
   const schedule = [];
-  // --- MODIFIED (TASK 2.1.1): Read discountDurationMonths ---
+
+  // --- **[THE FIX]**: Correctly destructure `discountDurationMonths` ---
   const {
-    discountDurationMonths, // e.g., "36"
+    discountUsd,
+    discountPct,
+    discountDurationMonths, // Use this one
   } = lockedVars;
-  // --- END MODIFIED ---
-  
+  // --- END FIX ---
+
   const {
     setupFee,
     amortizedMonthly,
     tierMonthly,
     amortizedMonthlyDiscountVal,
     tierMonthlyDiscountVal,
-    amortizationTerm
+    amortizationTerm,
   } = calculatedFees;
 
   // --- 1. Helper Functions to parse dates ---
@@ -306,7 +332,10 @@ export function generatePaymentSchedule(
   let yr2RulesStartDt = parseYyyyMmToDate(lockedVars.yr2StartDate, 0);
 
   // Default Y2 logic
-  if (lockedVars.billingSchedule === 'seasonal' && !lockedVars.yr2SeasonalRange) {
+  if (
+    lockedVars.billingSchedule === 'seasonal' &&
+    !lockedVars.yr2SeasonalRange
+  ) {
     yr2Months = yr1Months;
     yr2Desc = yr1Desc;
     if (!lockedVars.yr2StartDate && yr1StartDt) {
@@ -331,16 +360,18 @@ export function generatePaymentSchedule(
   // --- 4. Loop through months ---
   const firstPaymentDate = amortStartObj;
   // Start loop from 1st of *next* month
-  let paymentDate = addMonths(startOfMonth(new Date()), 1); 
+  let paymentDate = addMonths(startOfMonth(new Date()), 1);
   // --- MODIFIED (USER REQ 3): Use paymentScheduleYears ---
-  const maxMonthsToShow = (parseInt(lockedVars.paymentScheduleYears, 10) || 2) * 12;
+  const maxMonthsToShow =
+    (parseInt(lockedVars.paymentScheduleYears, 10) || 2) * 12;
   let hasShownYear2Header = false;
 
   for (let i = 0; i < maxMonthsToShow; i++) {
     // Check for Year 2+ Rules Start
     if (
       yr2RulesStartDt &&
-      (isSameDay(paymentDate, yr2RulesStartDt) || isAfter(paymentDate, yr2RulesStartDt)) &&
+      (isSameDay(paymentDate, yr2RulesStartDt) ||
+        isAfter(paymentDate, yr2RulesStartDt)) &&
       !hasShownYear2Header
     ) {
       schedule.push({
@@ -367,17 +398,18 @@ export function generatePaymentSchedule(
         firstPaymentDate
       );
 
-      // --- MODIFIED (TASK 2.1.1): Check if discount is active ---
+      // --- [FIX (TASK 2.2.2)]: Correct logic ---
       const durationInMonths = parseInt(discountDurationMonths, 10) || 0;
       // A duration of 0 means the discount is perpetual.
-      const isDiscountActive = durationInMonths === 0 || paymentMonthIdx < durationInMonths;
-      // --- END MODIFIED ---
+      const isDiscountActive =
+        durationInMonths === 0 || paymentMonthIdx < durationInMonths;
+      // --- END FIX ---
 
       // --- 1. Amortization Payment ---
       let currentAmortPayment = 0;
       if (paymentMonthIdx < amortizationTerm) {
         currentAmortPayment = amortizedMonthly; // This is already the discounted amount
-        
+
         // --- Fix for Point 3 ---
         if (currentAmortPayment > 0) {
           notesList.push('Build Pmt');
@@ -385,15 +417,18 @@ export function generatePaymentSchedule(
             notesList.push('(Discounted)');
           }
         }
-        
+
         // Check if discount *ends*
         if (!isDiscountActive && amortizedMonthlyDiscountVal > 0) {
           currentAmortPayment += amortizedMonthlyDiscountVal; // Add back discount
-          
-          if (notesList.indexOf('Build Pmt (Full Rate)') === -1 && notesList.indexOf('Build Pmt') === -1) {
-             notesList.push('Build Pmt (Full Rate)');
+
+          if (
+            notesList.indexOf('Build Pmt (Full Rate)') === -1 &&
+            notesList.indexOf('Build Pmt') === -1
+          ) {
+            notesList.push('Build Pmt (Full Rate)');
           } else if (notesList.indexOf('Build Pmt') > -1) {
-             notesList[notesList.indexOf('Build Pmt')] = 'Build Pmt (Full Rate)';
+            notesList[notesList.indexOf('Build Pmt')] = 'Build Pmt (Full Rate)';
           }
         }
       }
@@ -404,7 +439,8 @@ export function generatePaymentSchedule(
 
       if (
         yr2RulesStartDt &&
-        (isSameDay(paymentDate, yr2RulesStartDt) || isAfter(paymentDate, yr2RulesStartDt))
+        (isSameDay(paymentDate, yr2RulesStartDt) ||
+          isAfter(paymentDate, yr2RulesStartDt))
       ) {
         activeSeasonalMonths = yr2Months;
       }
@@ -453,7 +489,10 @@ export function generatePaymentSchedule(
     });
 
     // Add Fiscal Year Summary
-    if (isSameDay(paymentDate, firstPaymentDate) || isAfter(paymentDate, firstPaymentDate)) {
+    if (
+      isSameDay(paymentDate, firstPaymentDate) ||
+      isAfter(paymentDate, firstPaymentDate)
+    ) {
       const paymentMonthIdx = differenceInCalendarMonths(
         paymentDate,
         firstPaymentDate
